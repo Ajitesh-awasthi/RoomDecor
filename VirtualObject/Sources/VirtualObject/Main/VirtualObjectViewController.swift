@@ -860,110 +860,69 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     }
 
     private func populatePaletteItems() {
-        // Ensure stack exists
-        guard let stack = self.paletteStack else {
-            if enablePanDebugPrints { print("PAL: populatePaletteItems - paletteStack nil") }
-            return
+        // Clear previous
+        paletteStack?.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        // Acquire list of types (prefer CaseIterable)
+        let types: [VirtualObjectType]
+        if let all = (VirtualObjectType.self as? CaseIterable.Type) {
+            types = (VirtualObjectType.allCases as? [VirtualObjectType]) ?? []
+        } else {
+            types = []
         }
 
-        // clear existing items
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        // Collect types (prefer CaseIterable)
-        let types: [VirtualObjectType] = {
-            if let all = (VirtualObjectType.allCases as? [VirtualObjectType]) {
-                return all
-            } else {
-                return [presenter.type]
-            }
-        }()
-
-        for type in types {
-            // Create a simple horizontal row view similar to VirtualObjectCardView but minimal and guaranteed to be visible
-            let row = UIView()
-            row.translatesAutoresizingMaskIntoConstraints = false
-            row.heightAnchor.constraint(equalToConstant: 64).isActive = true
-            row.layer.cornerRadius = 8
-            row.layer.masksToBounds = true
-            row.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.95) // light background for readability
-
-            // thumbnail
-            let thumb = UIImageView()
-            thumb.translatesAutoresizingMaskIntoConstraints = false
-            thumb.contentMode = .scaleAspectFit
-            if let img = UIImage(named: "\(type.rawValue)-thumb", in: .module, with: nil) {
-                thumb.image = img
-            } else if #available(iOS 13.0, *) {
-                thumb.image = UIImage(systemName: "cube.box.fill")
-                thumb.tintColor = .systemBlue
-            }
-            row.addSubview(thumb)
-
-            // label
-            let lbl = UILabel()
-            lbl.translatesAutoresizingMaskIntoConstraints = false
-            lbl.text = type.title
-            lbl.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-            lbl.textColor = .label
-            lbl.numberOfLines = 1
-            row.addSubview(lbl)
-
-            // chevron on row (small)
-            let accessory = UIImageView()
-            accessory.translatesAutoresizingMaskIntoConstraints = false
-            if #available(iOS 13.0, *) {
-                accessory.image = UIImage(systemName: "chevron.right")
-                accessory.tintColor = .tertiaryLabel
-            }
-            row.addSubview(accessory)
-
-            // layout
-            NSLayoutConstraint.activate([
-                thumb.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
-                thumb.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                thumb.widthAnchor.constraint(equalToConstant: 44),
-                thumb.heightAnchor.constraint(equalToConstant: 44),
-
-                lbl.leadingAnchor.constraint(equalTo: thumb.trailingAnchor, constant: 8),
-                lbl.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                lbl.trailingAnchor.constraint(lessThanOrEqualTo: accessory.leadingAnchor, constant: -8),
-
-                accessory.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
-                accessory.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                accessory.widthAnchor.constraint(equalToConstant: 12)
-            ])
-
-            // Attach type on row (reliable mapping) using accessibilityIdentifier
-            row.accessibilityIdentifier = type.rawValue
-
-            // tap recognizer
-            let tap = UITapGestureRecognizer(target: self, action: #selector(paletteItemTapped(_:)))
-            row.addGestureRecognizer(tap)
-            row.isUserInteractionEnabled = true
-
-            // add subtle shadow for better contrast over AR content
-            row.layer.shadowColor = UIColor.black.cgColor
-            row.layer.shadowOpacity = 0.08
-            row.layer.shadowOffset = CGSize(width: 0, height: 1)
-            row.layer.shadowRadius = 4
-            row.layer.masksToBounds = false
-
-            stack.addArrangedSubview(row)
-        }
-
+        // Defensive: if no types, show placeholder
         if types.isEmpty {
             let lbl = UILabel()
             lbl.translatesAutoresizingMaskIntoConstraints = false
             lbl.text = "No objects"
-            lbl.textColor = .secondaryLabel
+            lbl.textColor = .label
             lbl.font = UIFont.systemFont(ofSize: 14, weight: .medium)
             lbl.textAlignment = .center
             lbl.heightAnchor.constraint(equalToConstant: 44).isActive = true
-            stack.addArrangedSubview(lbl)
+            paletteStack?.addArrangedSubview(lbl)
+            return
         }
 
-        if enablePanDebugPrints { print("PAL: populatePaletteItems -> added \(types.count) rows (light backgrounds)") }
+        // Create a card for each type and store its index in the view.tag so taps map reliably to types.
+        for (index, type) in types.enumerated() {
+            let card = VirtualObjectCardView(frame: .zero)
+            card.translatesAutoresizingMaskIntoConstraints = false
+
+            // Populate visible content: title and thumbnail (if available).
+            // Prefer using a thumbnail naming convention like "<rawValue>_thumb" in your asset bundle.
+            card.titleLabel?.text = type.title // use the readable title if available
+            if let imgName = "\(type.rawValue)_thumb" as String?,
+               let img = UIImage(named: imgName, in: .module, with: nil) {
+                card.imageView?.image = img
+            } else if let bundleImage = UIImage(systemName: "cube.box.fill") {
+                // fallback icon so user can see something
+                card.imageView?.image = bundleImage
+            }
+
+            // Tag the card with index so we can map back to types reliably
+            card.tag = index
+
+            // Make card touchable
+            card.isUserInteractionEnabled = true
+            let tap = UITapGestureRecognizer(target: self, action: #selector(paletteItemTapped(_:)))
+            card.addGestureRecognizer(tap)
+
+            // Visual sizing
+            card.heightAnchor.constraint(equalToConstant: 72).isActive = true
+
+            // Accessibility
+            card.accessibilityLabel = type.rawValue
+            card.accessibilityHint = "Add \(type.rawValue) to scene"
+
+            paletteStack?.addArrangedSubview(card)
+        }
+
+        // Ensure scroll/stack layout updates
+        paletteScrollView?.layoutIfNeeded()
+        if enablePanDebugPrints { print("PAL: populatePaletteItems created \(types.count) items") }
     }
+
 
 
     private func setPaletteCollapsed(_ collapsed: Bool, animated: Bool) {
@@ -1045,24 +1004,36 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     }
 
 
-    // Called when user taps an item in the palette; tries to place that object and collapse palette
     @objc private func paletteItemTapped(_ gesture: UITapGestureRecognizer) {
-        guard let view = gesture.view as? VirtualObjectCardView else { return }
-
-        // Derive the VirtualObjectType from the card. If you stored type on the card (recommended), use it.
-        // For now infer from titleLabel text (replace with robust mapping in your code).
-        let title = view.titleLabel?.text ?? ""
-        // map title -> VirtualObjectType (implement mapping function in your project)
-        if let selectedType = virtualObjectType(forDisplayName: title) {
-            // ask presenter to add object — use center of screen to place
-            presenter.addVirtualObject(screenCenter: screenCenter, sceneView: sceneView)
-            // collapse palette for clarity
-            setPaletteCollapsed(true, animated: true)
-        } else {
-            // fallback: just call presenter.addVirtualObject (your presenter may use a stored 'type' property)
-            presenter.addVirtualObject(screenCenter: screenCenter, sceneView: sceneView)
+        guard let card = gesture.view as? VirtualObjectCardView else {
+            if enablePanDebugPrints { print("PAL: paletteItemTapped - tap not on card") }
+            return
         }
+
+        // Recompute types in the same order used by populatePaletteItems()
+        let types: [VirtualObjectType]
+        if let all = (VirtualObjectType.self as? CaseIterable.Type) {
+            types = (VirtualObjectType.allCases as? [VirtualObjectType]) ?? []
+        } else {
+            types = []
+        }
+
+        let idx = card.tag
+        guard idx >= 0 && idx < types.count else {
+            if enablePanDebugPrints { print("PAL: paletteItemTapped - invalid index \(idx)") }
+            return
+        }
+
+        let selectedType = types[idx]
+        if enablePanDebugPrints { print("PAL: paletteItemTapped -> selected \(selectedType.rawValue) (index \(idx))") }
+
+        // Use the presenter's overload that accepts a type (must exist in your presenter)
+        presenter.addVirtualObject(ofType: selectedType, screenCenter: screenCenter, sceneView: sceneView)
+
+        // Collapse palette after selection for clarity
+        setPaletteCollapsed(true, animated: true)
     }
+
 
     // Helper: very small mapping function — replace with your project's mapping
     private func virtualObjectType(forDisplayName name: String) -> VirtualObjectType? {
