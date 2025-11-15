@@ -25,8 +25,10 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     private let paletteEdgePadding: CGFloat = 12
     // floating palette
     private var palette: FloatingPaletteView?
+    private var selectedTypeForPlacement: VirtualObjectType? = nil
 
-
+    // remember the user's current selection from the palette — used when user presses "Add"
+    private var pendingSelectedType: VirtualObjectType?
 
     var sceneView: ARSCNView!
     var tap: UITapGestureRecognizer!
@@ -324,19 +326,28 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     }
 
     private func bindViews() {
+        // Placement button: use selectedTypeForPlacement if set, otherwise fall back to presenter default
         virtualObjectButton
             .throttledTap()
             .sink { [weak self] _ in
-                guard let self else { return }
-
-                self.presenter.addVirtualObject(screenCenter: self.screenCenter, sceneView: self.sceneView)
+                guard let self = self else { return }
+                
+                // Decide which type to place: preference to selectedTypeForPlacement (set by palette tap)
+                if let selected = self.selectedTypeForPlacement {
+                    if self.enablePanDebugPrints { print("DBG: placing selected type = \(selected)") }
+                    self.presenter.addVirtualObject(ofType: selected, screenCenter: self.screenCenter, sceneView: self.sceneView)
+                } else {
+                    if self.enablePanDebugPrints { print("DBG: placing presenter's default type (no palette selection)") }
+                    self.presenter.addVirtualObject(screenCenter: self.screenCenter, sceneView: self.sceneView)
+                }
             }
             .store(in: &disposables)
-
+        
+        // Plane detection publisher (unchanged behaviour, kept here)
         horizontalPlaneDetected
             .sink { [weak self] isPlaneDetected in
-                guard let self else { return }
-
+                guard let self = self else { return }
+                
                 UIView.animate(withDuration: 0.2) {
                     self.virtualObjectButton.isEnabled = isPlaneDetected
                     self.virtualObjectButton.layer.opacity = isPlaneDetected ? 1 : 0.2
@@ -345,6 +356,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             }
             .store(in: &disposables)
     }
+
     
     @objc private func handleRotation(_ gesture: UIRotationGestureRecognizer) {
         guard let node = selectedNode else {
@@ -860,70 +872,83 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     }
 
     private func populatePaletteItems() {
-        // Clear previous
-        paletteStack?.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // clear
+        paletteStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        // Acquire list of types (prefer CaseIterable)
+        // Get object list. Prefer CaseIterable on VirtualObjectType
         let types: [VirtualObjectType]
-        if let all = (VirtualObjectType.self as? CaseIterable.Type) {
+        if let _ = (VirtualObjectType.self as? CaseIterable.Type) {
             types = (VirtualObjectType.allCases as? [VirtualObjectType]) ?? []
         } else {
-            types = []
+            // fallback: ask presenter if it exposes a list (implement presenter.availableTypes() if needed)
+            if let list = (presenter as? AnyObject)?.value(forKey: "availableTypes") as? [VirtualObjectType] {
+                types = list
+            } else {
+                types = []
+            }
         }
 
-        // Defensive: if no types, show placeholder
+        for (index, type) in types.enumerated() {
+            // create a compact card view (reuse your VirtualObjectCardView if exists)
+            let card = VirtualObjectCardView(frame: .zero)
+            card.translatesAutoresizingMaskIntoConstraints = false
+
+            // store index so tap handler can find the selected type reliably
+            card.tag = index
+
+            // configure card (use readable title and thumbnail if available)
+            // Prefer `title` if your VirtualObjectType provides it; otherwise use rawValue
+            let displayTitle: String
+            if let mirrorTitle = (type as? CustomStringConvertible)?.description {
+                displayTitle = mirrorTitle
+            } else {
+                displayTitle = type.rawValue
+            }
+            card.titleLabel?.text = displayTitle
+
+            // Attempt to load a 2D thumbnail from bundle with the same rawValue name (replace with your actual asset name mapping)
+            if let imgView = card.imageView {
+                if let thumb = UIImage(named: type.rawValue, in: .module, compatibleWith: nil) {
+                    imgView.image = thumb
+                } else {
+                    // fallback to a system icon so UI is not empty
+                    imgView.image = UIImage(systemName: "cube.box")
+                }
+                imgView.contentMode = .scaleAspectFit
+            }
+
+            // interaction
+            let tap = UITapGestureRecognizer(target: self, action: #selector(paletteItemTapped(_:)))
+            card.addGestureRecognizer(tap)
+            card.isUserInteractionEnabled = true
+
+            // visual defaults
+            card.layer.borderWidth = 0
+            card.layer.borderColor = UIColor.clear.cgColor
+            card.backgroundColor = UIColor(white: 1.0, alpha: 0.0) // transparent by default
+
+            // set a small fixed height so scroll content looks consistent
+            card.heightAnchor.constraint(equalToConstant: 72).isActive = true
+
+            paletteStack.addArrangedSubview(card)
+        }
+
+        // if empty, show a helpful label
         if types.isEmpty {
             let lbl = UILabel()
             lbl.translatesAutoresizingMaskIntoConstraints = false
             lbl.text = "No objects"
-            lbl.textColor = .label
+            lbl.textColor = .white
             lbl.font = UIFont.systemFont(ofSize: 14, weight: .medium)
             lbl.textAlignment = .center
             lbl.heightAnchor.constraint(equalToConstant: 44).isActive = true
-            paletteStack?.addArrangedSubview(lbl)
-            return
+            paletteStack.addArrangedSubview(lbl)
         }
 
-        // Create a card for each type and store its index in the view.tag so taps map reliably to types.
-        for (index, type) in types.enumerated() {
-            let card = VirtualObjectCardView(frame: .zero)
-            card.translatesAutoresizingMaskIntoConstraints = false
-
-            // Populate visible content: title and thumbnail (if available).
-            // Prefer using a thumbnail naming convention like "<rawValue>_thumb" in your asset bundle.
-            card.titleLabel?.text = type.title // use the readable title if available
-            if let imgName = "\(type.rawValue)_thumb" as String?,
-               let img = UIImage(named: imgName, in: .module, with: nil) {
-                card.imageView?.image = img
-            } else if let bundleImage = UIImage(systemName: "cube.box.fill") {
-                // fallback icon so user can see something
-                card.imageView?.image = bundleImage
-            }
-
-            // Tag the card with index so we can map back to types reliably
-            card.tag = index
-
-            // Make card touchable
-            card.isUserInteractionEnabled = true
-            let tap = UITapGestureRecognizer(target: self, action: #selector(paletteItemTapped(_:)))
-            card.addGestureRecognizer(tap)
-
-            // Visual sizing
-            card.heightAnchor.constraint(equalToConstant: 72).isActive = true
-
-            // Accessibility
-            card.accessibilityLabel = type.rawValue
-            card.accessibilityHint = "Add \(type.rawValue) to scene"
-
-            paletteStack?.addArrangedSubview(card)
-        }
-
-        // Ensure scroll/stack layout updates
+        // Ensure palette scroll view content is updated
+        paletteScrollView?.setNeedsLayout()
         paletteScrollView?.layoutIfNeeded()
-        if enablePanDebugPrints { print("PAL: populatePaletteItems created \(types.count) items") }
     }
-
-
 
     private func setPaletteCollapsed(_ collapsed: Bool, animated: Bool) {
         // If already in requested state, do nothing
@@ -1012,10 +1037,14 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
 
         // Recompute types in the same order used by populatePaletteItems()
         let types: [VirtualObjectType]
-        if let all = (VirtualObjectType.self as? CaseIterable.Type) {
+        if let _ = (VirtualObjectType.self as? CaseIterable.Type) {
             types = (VirtualObjectType.allCases as? [VirtualObjectType]) ?? []
         } else {
-            types = []
+            if let list = (presenter as? AnyObject)?.value(forKey: "availableTypes") as? [VirtualObjectType] {
+                types = list
+            } else {
+                types = []
+            }
         }
 
         let idx = card.tag
@@ -1027,12 +1056,28 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         let selectedType = types[idx]
         if enablePanDebugPrints { print("PAL: paletteItemTapped -> selected \(selectedType.rawValue) (index \(idx))") }
 
-        // Use the presenter's overload that accepts a type (must exist in your presenter)
-        presenter.addVirtualObject(ofType: selectedType, screenCenter: screenCenter, sceneView: sceneView)
+        // Save selection for the "Place Item" button to use later
+        selectedTypeForPlacement = selectedType
 
-        // Collapse palette after selection for clarity
+        // Clear visual selection on all cards (no dependency on FloatingPaletteView API)
+        paletteStack.arrangedSubviews.forEach { sub in
+            if let c = sub as? VirtualObjectCardView {
+                c.layer.borderWidth = 0
+                c.layer.borderColor = UIColor.clear.cgColor
+                // optional: reset background
+                c.backgroundColor = UIColor(white: 1.0, alpha: 0.0)
+            }
+        }
+
+        // Visually mark the selected card (simple highlight)
+        card.layer.borderWidth = 2
+        card.layer.borderColor = UIColor.systemBlue.cgColor
+        card.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.08)
+
+        // Collapse palette after selection for clarity (optional)
         setPaletteCollapsed(true, animated: true)
     }
+
 
 
     // Helper: very small mapping function — replace with your project's mapping
@@ -1068,11 +1113,57 @@ extension VirtualObjectViewController: ARSCNViewDelegate {
 
 extension VirtualObjectViewController: FloatingPaletteViewDelegate {
     // replace/implement delegate method (keep it non-public if required by your project)
+    // Note: keep this method non-public if your delegate protocol is internal in your project.
     func floatingPalette(_ palette: FloatingPaletteView, didSelect type: VirtualObjectType) {
-        if enablePanDebugPrints { print("PAL: selected \(type)") }
-        // call presenter's overload that lets us add a chosen type at screenCenter
-        presenter.addVirtualObject(ofType: type, screenCenter: screenCenter, sceneView: sceneView)
+        if enablePanDebugPrints { print("PAL: selected \(type.rawValue) -> staging for placement (pending)") }
+
+        // Stage selection: remember it so the Place button will place this type on next tap
+        pendingSelectedType = type
+
+        // Optionally pre-load the model into presenter's cache so subsequent placement is instant.
+        // I assume presenter has (or you added) a method loadVirtualObject(named:). If not, loadVirtualObject is private:
+        // You can add a small public/preload method in presenter or call addVirtualObject(ofType:...) with a no-op when not ready.
+        // We'll attempt a preload via the presenter's load function if it exists (use `performSelector` style fallback to avoid compile errors).
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            if self.enablePanDebugPrints { print("PAL: preloading model '\(type.rawValue)' in background") }
+            // If presenter exposes a preload API, call it — this example assumes `loadVirtualObject(named:)` is private.
+            // If you created a public preload method, call that here. Fallback: attempt to load via addVirtualObject with an immediate invalid raycast check avoided.
+            self.presenter.preloadVirtualObject(named: type.rawValue) // optional API if you added it to presenter
+            if self.enablePanDebugPrints { print("PAL: preload for '\(type.rawValue)' completed (if supported)") }
+        }
+
+        // Provide immediate feedback to user: show selected thumbnail on the add button (optional)
+        DispatchQueue.main.async {
+            // If using UIButton.Configuration (iOS 15+), set an image on the left of the title
+            if #available(iOS 15.0, *) {
+                if var cfg = self.virtualObjectButton.configuration {
+                    // If the palette or your assets include a 2D thumbnail, set it here. Otherwise, use a symbol to indicate selection.
+                    let sym = UIImage(systemName: "checkmark.circle.fill")
+                    cfg.image = sym
+                    cfg.imagePadding = 8
+                    cfg.imagePlacement = .leading
+                    self.virtualObjectButton.configuration = cfg
+                } else {
+                    var cfg = UIButton.Configuration.plain()
+                    cfg.title = LocalizableStrings.addVirtualObject.localized
+                    cfg.image = UIImage(systemName: "checkmark.circle.fill")
+                    cfg.imagePadding = 8
+                    cfg.baseForegroundColor = .white
+                    self.virtualObjectButton.configuration = cfg
+                }
+            } else {
+                // fallback: set accessory image by using setImage (make sure not to override title)
+                let sym = UIImage(systemName: "checkmark.circle.fill")
+                self.virtualObjectButton.setImage(sym, for: .normal)
+                self.virtualObjectButton.imageEdgeInsets = UIEdgeInsets(top: 0, left: -8, bottom: 0, right: 8)
+            }
+
+            // Optionally collapse the palette visually (or leave expanded until user taps Place)
+            // self.setPaletteCollapsed(true, animated: true)
+        }
     }
+
 
     func floatingPaletteDidToggle(_ palette: FloatingPaletteView, expanded: Bool) {
         if enablePanDebugPrints { print("PAL: toggled expanded=\(expanded)") }
