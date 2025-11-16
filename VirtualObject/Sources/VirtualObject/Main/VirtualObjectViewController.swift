@@ -4,7 +4,7 @@ import UIKit
 import Core
 import CoreUi
 
-public class VirtualObjectViewController: UIViewController, UIGestureRecognizerDelegate {
+public class VirtualObjectViewController: UIViewController, UIGestureRecognizerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UISearchBarDelegate {
 
     let session = ARSession()
     let defaultPadding: CGFloat = 8
@@ -18,6 +18,23 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     private var paletteScrollView: UIScrollView!
     private var paletteStack: UIStackView!
     private var paletteIsCollapsed: Bool = true
+    
+    private var remoteItems: [[String: Any]] = []
+    // Cart UI + placed items tracking
+    private var cartButton: UIButton!
+    private var cartBadgeLabel: UILabel!
+    private var cartTotalLabel: UILabel!
+    private var placedItems: [[String: Any]] = []
+
+    // Search/upload UI
+    private var searchContainer: UIView?
+    private var searchBar: UISearchBar?
+    private var cameraButton: UIButton?
+    // Last selected image that will be sent to the API
+    private var selectedImage: UIImage?
+    // add near other UI vars
+    private var searchCameraButton: UIButton?
+
 
     // Palette sizing
     private let paletteCollapsedWidth: CGFloat = 56
@@ -266,6 +283,10 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         // 7) binding & debug
         bindViews()
         setupFloatingPalette()
+        createSearchUI()
+        styleSearchUI()
+        defineSearchLayout()
+        setupCartUI()
 
         // Make sure UI is above the AR view (very important — ARSCNView tends to cover everything visually)
         view.bringSubviewToFront(backButton)
@@ -289,8 +310,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         print("DBG: viewDidLoad() - end")
     }
 
-
-
     public override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
@@ -303,11 +322,25 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         navigationController?.navigationBar.isHidden = false
     }
 
+    // Ensure AR session is running when the view becomes visible.
+    // This helps in cases where we paused it before presenting the picker.
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
         UIApplication.shared.isIdleTimerDisabled = true
+
+        // Ensure session is running (re-run config if necessary)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self = self else { return }
+            if let worldConfig = self.sessionConfig as? ARWorldTrackingConfiguration {
+                self.session.run(worldConfig, options: [])
+                if self.enablePanDebugPrints { print("AR: session.run called in viewDidAppear to ensure camera resumed") }
+            } else {
+                if self.enablePanDebugPrints { print("AR: no ARWorldTrackingConfiguration available to run") }
+            }
+        }
     }
+
 
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
@@ -356,8 +389,456 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             }
             .store(in: &disposables)
     }
+    
+    // Creates the search container, search bar and camera/upload button.
+    // Call this once (for example at the end of viewDidLoad after backButton & palette are created).
+    func createSearchUI() {
+        // remove existing if re-created accidentally
+        if let existing = view.viewWithTag(0xDEADBEEF) {
+            existing.removeFromSuperview()
+        }
+
+        // container to hold search bar + camera button
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = .clear
+        container.tag = 0xDEADBEEF
+        view.addSubview(container)
+
+        // search bar
+        let sb = UISearchBar(frame: .zero)
+        sb.translatesAutoresizingMaskIntoConstraints = false
+        sb.placeholder = "Search objects or upload an image"
+        sb.searchBarStyle = .minimal
+        sb.returnKeyType = .search
+        sb.autocapitalizationType = .none
+        sb.isTranslucent = true
+        if #available(iOS 13.0, *) {
+            // make the text field readable over AR; light translucent background
+            sb.searchTextField.backgroundColor = UIColor(white: 1.0, alpha: 0.9)
+            sb.searchTextField.textColor = .label
+        } else {
+            sb.backgroundImage = UIImage() // minimize background on older iOS
+        }
+
+        // camera/upload button
+        let cameraButton = UIButton(type: .system)
+        cameraButton.translatesAutoresizingMaskIntoConstraints = false
+        cameraButton.accessibilityIdentifier = "searchCameraButton"
+        if #available(iOS 13.0, *) {
+            let cfg = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            cameraButton.setImage(UIImage(systemName: "camera.fill", withConfiguration: cfg), for: .normal)
+        } else {
+            cameraButton.setTitle("📷", for: .normal)
+        }
+        cameraButton.tintColor = .label
+        cameraButton.backgroundColor = UIColor(white: 0.0, alpha: 0.35)
+        cameraButton.layer.cornerRadius = 6
+        cameraButton.clipsToBounds = true
+        cameraButton.addTarget(self, action: #selector(searchCameraTapped(_:)), for: .touchUpInside)
+
+        container.addSubview(sb)
+        container.addSubview(cameraButton)
+
+        // Constraints:
+        // Fixed height, centerX, and minimum width so it doesn't collapse to a pill.
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: defaultPadding),
+            container.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            container.heightAnchor.constraint(equalToConstant: 40),
+            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 240) // ensure visible wide pill
+        ])
+
+        // Internal layout
+        NSLayoutConstraint.activate([
+            sb.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            sb.topAnchor.constraint(equalTo: container.topAnchor),
+            sb.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            cameraButton.leadingAnchor.constraint(equalTo: sb.trailingAnchor, constant: 8),
+            cameraButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            cameraButton.centerYAnchor.constraint(equalTo: sb.centerYAnchor),
+            cameraButton.widthAnchor.constraint(equalToConstant: 40),
+            cameraButton.heightAnchor.constraint(equalToConstant: 32)
+        ])
+
+        // Keep the search container within the gap between back and palette buttons if they exist:
+        // leading >= backButton.trailing + padding OR leading >= safe area leading
+        if let back = self.backButton, back.superview != nil {
+            let lead = container.leadingAnchor.constraint(greaterThanOrEqualTo: back.trailingAnchor, constant: defaultPadding)
+            lead.priority = .required
+            lead.isActive = true
+        } else {
+            let lead = container.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: defaultPadding * 2)
+            lead.priority = .required
+            lead.isActive = true
+        }
+
+        // trailing <= paletteToggleButton.leading - padding OR safe area trailing
+        if let pbtn = (self.paletteToggleButton ?? self.paletteButton), pbtn.superview != nil {
+            let trail = container.trailingAnchor.constraint(lessThanOrEqualTo: pbtn.leadingAnchor, constant: -defaultPadding)
+            trail.priority = .required
+            trail.isActive = true
+        } else {
+            let trail = container.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -defaultPadding * 2)
+            trail.priority = .required
+            trail.isActive = true
+        }
+
+        // Make sure the search bar is flexible and camera button resists shrinking
+        sb.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        sb.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        cameraButton.setContentHuggingPriority(.required, for: .horizontal)
+        cameraButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // Store references (so style/other methods can access)
+        self.searchBar = sb
+        self.searchCameraButton = cameraButton
+
+        // Bring above AR content
+        view.bringSubviewToFront(container)
+        view.bringSubviewToFront(backButton)
+        if let p = paletteToggleButton { view.bringSubviewToFront(p) }
+        if let p2 = paletteButton { view.bringSubviewToFront(p2) }
+
+        if enablePanDebugPrints {
+            print("DBG: createSearchUI() - container added, initial frame (may be zero until layout): \(container.frame)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                print("DBG: createSearchUI() - frames after layout -> container:\(container.frame) sb:\(sb.frame) camera:\(cameraButton.frame)")
+            }
+        }
+    }
+    
+    public func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        // dismiss keyboard immediately
+        searchBar.resignFirstResponder()
+
+        let query = (searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            if enablePanDebugPrints { print("SEARCH: empty query — ignoring") }
+            return
+        }
+
+        if enablePanDebugPrints { print("SEARCH: user searched text -> '\(query)'") }
+
+        // Show loader
+        showLoading(true, message: "Searching...")
+
+        Task { @MainActor in
+            let macIP = self.getMacIP()
+            guard let data = await self.callSearchAPI(macIP: macIP, prompt: query) else {
+                // hide loader and show error
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "Search failed")
+                return
+            }
+
+            // Parse the expected JSON array into dictionaries
+            var items: [[String: Any]] = []
+            do {
+                let json = try JSONSerialization.jsonObject(with: data, options: [])
+                if let arr = json as? [[String: Any]] {
+                    items = arr
+                } else {
+                    if enablePanDebugPrints { print("SEARCH: response not in expected array format") }
+                }
+            } catch {
+                if enablePanDebugPrints { print("SEARCH: JSON parse error -> \(error.localizedDescription)") }
+            }
+
+            // If no items returned, inform user
+            if items.isEmpty {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "No results")
+                return
+            }
+
+            // Ensure palette exists and expand it before populating
+            if self.paletteContainer == nil {
+                self.setupFloatingPalette()
+            }
+            self.setPaletteCollapsed(false, animated: true)
+
+            // Populate palette UI with parsed items
+            self.populatePaletteItems(with: items)
+
+            // hide loader and update info
+            self.showLoading(false, message: nil)
+            self.infoView.set(title: "Found \(items.count) items")
+        }
+    }
+
 
     
+    // Show an action sheet letting the user pick Camera or Photo Library
+    @objc func searchCameraTapped(_ sender: Any?) {
+        let alert = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Take Photo", style: .default, handler: { [weak self] _ in
+            self?.presentImagePicker(source: .camera)
+        }))
+        alert.addAction(UIAlertAction(title: "Choose from Library", style: .default, handler: { [weak self] _ in
+            self?.presentImagePicker(source: .photoLibrary)
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        // iPad popover anchor
+        if let pop = alert.popoverPresentationController {
+            pop.sourceView = self.view
+            // anchor near top-center (where search bar is)
+            pop.sourceRect = CGRect(x: self.view.bounds.midX, y: 44, width: 1, height: 1)
+            pop.permittedArrowDirections = .any
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.present(alert, animated: true)
+        }
+    }
+
+    // Configure the UISearchBar delegate and appearance. Ensure class conforms to UISearchBarDelegate.
+    func styleSearchUI() {
+        guard let sb = self.searchBar else {
+            if enablePanDebugPrints { print("DBG: styleSearchUI() - searchBar is nil") }
+            return
+        }
+
+        sb.delegate = self
+
+        // Allow keyboard return to trigger search
+        sb.searchTextField.clearButtonMode = .whileEditing
+        sb.enablesReturnKeyAutomatically = false
+
+        // Slight shadow for legibility when over AR content
+        sb.layer.shadowColor = UIColor.black.cgColor
+        sb.layer.shadowOpacity = 0.12
+        sb.layer.shadowOffset = CGSize(width: 0, height: 1)
+        sb.layer.shadowRadius = 2
+
+        // If you want rounded pill look:
+        sb.layer.cornerRadius = 10
+        sb.clipsToBounds = true
+
+        // Make sure camera/upload button is touchable and visible
+        self.searchCameraButton?.isHidden = false
+        self.searchCameraButton?.alpha = 1.0
+
+        if enablePanDebugPrints {
+            print("DBG: styleSearchUI() - applied styles to searchBar and cameraButton")
+        }
+    }
+    
+    // If you split layout into separate steps, call this after createSearchUI() and styleSearchUI().
+    // This ensures layout constraints are updated and the search container doesn't overlap the corner buttons.
+    func defineSearchLayout() {
+        guard let container = view.viewWithTag(0xDEADBEEF) else {
+            if enablePanDebugPrints { print("DBG: defineSearchLayout() - container missing") }
+            return
+        }
+
+        // Force a layout pass and then make small adjustments if needed
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+
+        // If the container is too wide and collides with corner buttons, reduce its width to fit between them.
+        var leftEdge: CGFloat = view.safeAreaInsets.left + defaultPadding * 2
+        var rightEdge: CGFloat = view.bounds.width - (view.safeAreaInsets.right + defaultPadding * 2)
+
+        if let back = backButton, back.superview != nil {
+            leftEdge = max(leftEdge, back.frame.maxX + defaultPadding)
+        }
+        if let pbtn = (paletteToggleButton ?? paletteButton), pbtn.superview != nil {
+            rightEdge = min(rightEdge, pbtn.frame.minX - defaultPadding)
+        }
+
+        let maxAllowedWidth = max(160, rightEdge - leftEdge)
+        // find width constraint we added earlier and update it if necessary
+        if let w = container.constraints.first(where: { $0.firstAttribute == .width && $0.relation == .greaterThanOrEqual }) {
+            w.constant = min(w.constant, maxAllowedWidth)
+        } else {
+            // set an upper bound so it doesn't overflow
+            container.widthAnchor.constraint(lessThanOrEqualToConstant: maxAllowedWidth).isActive = true
+        }
+
+        // final bring to front
+        view.bringSubviewToFront(container)
+        view.bringSubviewToFront(backButton)
+        if let p = paletteToggleButton { view.bringSubviewToFront(p) }
+        if let p2 = paletteButton { view.bringSubviewToFront(p2) }
+
+        if enablePanDebugPrints {
+            print("DBG: defineSearchLayout() - container.frame = \(container.frame) maxAllowedWidth=\(maxAllowedWidth)")
+        }
+    }
+
+    @objc private func showImageOptions(_ sender: Any?) {
+        let ac = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            ac.addAction(UIAlertAction(title: NSLocalizedString("Take Photo", comment: ""), style: .default, handler: { [weak self] _ in
+                self?.presentImagePicker(source: .camera)
+            }))
+        }
+
+        ac.addAction(UIAlertAction(title: NSLocalizedString("Choose from Library", comment: ""), style: .default, handler: { [weak self] _ in
+            self?.presentImagePicker(source: .photoLibrary)
+        }))
+
+        ac.addAction(UIAlertAction(title: NSLocalizedString("Cancel", comment: ""), style: .cancel, handler: nil))
+
+        // iPad: anchor to camera button or search container
+        if let pop = ac.popoverPresentationController, let cam = self.cameraButton {
+            pop.sourceView = cam
+            pop.sourceRect = cam.bounds
+            pop.permittedArrowDirections = .any
+        }
+
+        DispatchQueue.main.async {
+            self.present(ac, animated: true)
+        }
+    }
+    
+    // Updates: pause ARSession before presenting; present on main thread; set delegates properly.
+    private func presentImagePicker(source: UIImagePickerController.SourceType) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            guard UIImagePickerController.isSourceTypeAvailable(source) else {
+                let alert = UIAlertController(title: "Unavailable", message: source == .camera ? "Camera not available" : "Photo library not available", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                self.present(alert, animated: true)
+                return
+            }
+
+            // Pause AR session to free camera resources (prevents conflicts)
+            self.session.pause()
+            if self.enablePanDebugPrints { print("IMAGE: AR session paused before presenting picker") }
+
+            let picker = UIImagePickerController()
+            picker.sourceType = source
+            picker.delegate = self
+            picker.modalPresentationStyle = .fullScreen
+            picker.allowsEditing = false
+
+            self.present(picker, animated: true)
+        }
+    }
+    
+    public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        // Always dismiss on main thread
+        DispatchQueue.main.async {
+            picker.dismiss(animated: true, completion: nil)
+            if self.enablePanDebugPrints { print("IMAGE: user cancelled image picker") }
+        }
+    }
+    
+    public func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        // Extract image
+        var chosenImage: UIImage?
+        if let edited = info[.editedImage] as? UIImage { chosenImage = edited }
+        else if let original = info[.originalImage] as? UIImage { chosenImage = original }
+
+        // Dismiss first to avoid UI freeze/hang. Then process off main thread.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            picker.dismiss(animated: true) {
+                if self.enablePanDebugPrints { print("IMAGE: picker dismissed, image != nil -> \(chosenImage != nil)") }
+
+                // Resume AR session safely (small delay)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    if let config = self.sessionConfig as? ARWorldTrackingConfiguration {
+                        self.session.run(config, options: [])
+                    }
+                }
+
+                guard let image = chosenImage else {
+                    if self.enablePanDebugPrints { print("IMAGE: no image to process") }
+                    return
+                }
+
+                // Offload heavy processing and network to background queue
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    guard let self = self else { return }
+
+                    // Downscale/encode to JPEG to reduce upload size
+                    let maxSide: CGFloat = 1024
+                    let processed: UIImage
+                    if max(image.size.width, image.size.height) > maxSide {
+                        let aspect = image.size.width / image.size.height
+                        let newSize = aspect > 1 ? CGSize(width: maxSide, height: maxSide / aspect) : CGSize(width: maxSide * aspect, height: maxSide)
+                        UIGraphicsBeginImageContextWithOptions(newSize, true, 0.8)
+                        image.draw(in: CGRect(origin: .zero, size: newSize))
+                        processed = UIGraphicsGetImageFromCurrentImageContext() ?? image
+                        UIGraphicsEndImageContext()
+                    } else {
+                        processed = image
+                    }
+
+                    guard let jpegData = processed.jpegData(compressionQuality: 0.8) else {
+                        DispatchQueue.main.async {
+                            if self.enablePanDebugPrints { print("IMAGE: failed to encode JPEG") }
+                            self.infoView.set(title: "Image encode failed")
+                        }
+                        return
+                    }
+
+                    // store selected image in case you need it later
+                    self.selectedImage = processed
+
+                    // Show uploading loader
+                    DispatchQueue.main.async {
+                        self.showLoading(true, message: "Uploading...")
+                        self.infoView.set(title: "Uploading image...")
+                    }
+
+                    let macIP = self.getMacIP()
+
+                    Task { @MainActor in
+                        guard let data = await self.uploadImageToMacAPI(macIP: macIP, imageData: jpegData) else {
+                            self.showLoading(false, message: nil)
+                            self.infoView.set(title: "Upload failed")
+                            if self.enablePanDebugPrints { print("IMAGE: upload returned nil") }
+                            return
+                        }
+
+                        // parse JSON array
+                        var items: [[String: Any]] = []
+                        do {
+                            let json = try JSONSerialization.jsonObject(with: data, options: [])
+                            if let arr = json as? [[String: Any]] {
+                                items = arr
+                            } else {
+                                if self.enablePanDebugPrints { print("IMAGE: upload response not an array") }
+                            }
+                        } catch {
+                            if self.enablePanDebugPrints { print("IMAGE: parse error -> \(error.localizedDescription)") }
+                        }
+
+                        if items.isEmpty {
+                            self.showLoading(false, message: nil)
+                            self.infoView.set(title: "No items returned")
+                            return
+                        }
+
+                        // Ensure palette exists and expand it
+                        if self.paletteContainer == nil {
+                            self.setupFloatingPalette()
+                        }
+                        self.setPaletteCollapsed(false, animated: true)
+
+                        // Populate palette with returned items
+                        self.populatePaletteItems(with: items)
+
+                        // Hide loader and update UI
+                        self.showLoading(false, message: nil)
+                        self.infoView.set(title: "Found \(items.count) items")
+                    }
+                }
+            }
+        }
+    }
+
+
     @objc private func handleRotation(_ gesture: UIRotationGestureRecognizer) {
         guard let node = selectedNode else {
             return
@@ -376,7 +857,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             break
         }
     }
-
 
     // Tap -> select a node under the tap
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -424,7 +904,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             selectedNode = nil
         }
     }
-
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         // Only act once when the gesture begins
@@ -520,7 +999,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             }
         }
     }
-
 
     private func cameraWorldPosition() -> simd_float3? {
         guard let t = sceneView.pointOfView?.simdWorldTransform else { return nil }
@@ -832,7 +1310,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
         ])
 
-        // Populate items now
+        // Populate items now (wrapper uses remoteItems)
         populatePaletteItems()
 
         // Collapsed logical state
@@ -871,84 +1349,258 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         return []
     }
 
+    // wrapper so previous calls without args still work
     private func populatePaletteItems() {
-        // clear
-        paletteStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        populatePaletteItems(with: self.remoteItems)
+    }
 
-        // Get object list. Prefer CaseIterable on VirtualObjectType
-        let types: [VirtualObjectType]
-        if let _ = (VirtualObjectType.self as? CaseIterable.Type) {
-            types = (VirtualObjectType.allCases as? [VirtualObjectType]) ?? []
-        } else {
-            // fallback: ask presenter if it exposes a list (implement presenter.availableTypes() if needed)
-            if let list = (presenter as? AnyObject)?.value(forKey: "availableTypes") as? [VirtualObjectType] {
-                types = list
-            } else {
-                types = []
-            }
+    private func populatePaletteItems(with items: [[String: Any]]) {
+        // Persist items for later mapping when user taps a palette row
+        self.remoteItems = items
+
+        // Ensure palette stack exists
+        guard let stack = self.paletteStack, let scroll = self.paletteScrollView else {
+            if enablePanDebugPrints { print("PAL: populatePaletteItems -> missing UI stack/scroll") }
+            return
         }
 
-        for (index, type) in types.enumerated() {
-            // create a compact card view (reuse your VirtualObjectCardView if exists)
+        // Clear existing
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        // Build a card per returned item
+        for (index, dict) in items.enumerated() {
+            // Create or reuse your VirtualObjectCardView; if it doesn't match, create a generic card-like view
             let card = VirtualObjectCardView(frame: .zero)
             card.translatesAutoresizingMaskIntoConstraints = false
+            card.backgroundColor = UIColor.clear
+            card.layer.cornerRadius = 8
+            card.clipsToBounds = true
 
-            // store index so tap handler can find the selected type reliably
-            card.tag = index
+            // Use available fields safely
+            let name = dict["itemName"] as? String ?? ""
+            let price = dict["price"] as? NSNumber
+            let priceUnit = dict["priceUnit"] as? String ?? ""
+            let rating = dict["rating"] as? NSNumber
+            let img2D = dict["imageLink2D"] as? String
+            let length = dict["length"] as? NSNumber
+            let width = dict["width"] as? NSNumber
+            let height = dict["height"] as? NSNumber
+            let dimUnit = dict["dimUnit"] as? String ?? ""
 
-            // configure card (use readable title and thumbnail if available)
-            // Prefer `title` if your VirtualObjectType provides it; otherwise use rawValue
-            let displayTitle: String
-            if let mirrorTitle = (type as? CustomStringConvertible)?.description {
-                displayTitle = mirrorTitle
-            } else {
-                displayTitle = type.rawValue
+            // Configure title label (we will place it under rating)
+            if let tLabel = card.titleLabel {
+                tLabel.translatesAutoresizingMaskIntoConstraints = false
+                tLabel.numberOfLines = 2
+                tLabel.lineBreakMode = .byWordWrapping
+                tLabel.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+                tLabel.textColor = .white
+                tLabel.text = name
             }
-            card.titleLabel?.text = displayTitle
 
-            // Attempt to load a 2D thumbnail from bundle with the same rawValue name (replace with your actual asset name mapping)
+            // Reset image placeholder
             if let imgView = card.imageView {
-                if let thumb = UIImage(named: type.rawValue, in: .module, compatibleWith: nil) {
-                    imgView.image = thumb
-                } else {
-                    // fallback to a system icon so UI is not empty
-                    imgView.image = UIImage(systemName: "cube.box")
-                }
-                imgView.contentMode = .scaleAspectFit
+                imgView.image = UIImage(systemName: "photo")
+                imgView.contentMode = .scaleAspectFill
+                imgView.clipsToBounds = true
+                imgView.translatesAutoresizingMaskIntoConstraints = false
+                imgView.layer.cornerRadius = 6
             }
 
-            // interaction
+            // Price label (right side)
+            let priceLabel = UILabel()
+            priceLabel.translatesAutoresizingMaskIntoConstraints = false
+            priceLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+            priceLabel.textAlignment = .right
+            priceLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            priceLabel.setContentHuggingPriority(.required, for: .horizontal)
+            if let p = price?.doubleValue {
+                priceLabel.text = String(format: "%.0f %@", p, priceUnit)
+            } else {
+                priceLabel.text = "-"
+            }
+
+            // Rating label (below price)
+            let ratingLabel = UILabel()
+            ratingLabel.translatesAutoresizingMaskIntoConstraints = false
+            ratingLabel.font = UIFont.systemFont(ofSize: 12, weight: .regular)
+            ratingLabel.textAlignment = .right
+            ratingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            if let r = rating?.doubleValue {
+                ratingLabel.text = String(format: "★ %.1f", r)
+            } else {
+                ratingLabel.text = "★ -"
+            }
+
+            // Size label below image — allow wrap and full text (no truncation)
+            let sizeLabel = UILabel()
+            sizeLabel.translatesAutoresizingMaskIntoConstraints = false
+            sizeLabel.font = UIFont.systemFont(ofSize: 12, weight: .regular)
+            sizeLabel.textAlignment = .center
+            sizeLabel.numberOfLines = 1
+            sizeLabel.lineBreakMode = .byClipping
+            if let l = length?.doubleValue, let w = width?.doubleValue, let h = height?.doubleValue {
+                sizeLabel.text = String(format: "%.1f x %.1f x %.1f %@", l, w, h, dimUnit)
+            } else {
+                sizeLabel.text = ""
+            }
+
+            // Add subviews
+            card.addSubview(priceLabel)
+            card.addSubview(ratingLabel)
+            card.addSubview(sizeLabel)
+            if let imgView = card.imageView { card.addSubview(imgView) }
+            if let tLabel = card.titleLabel { card.addSubview(tLabel) }
+
+            // Layout accessory labels relative to card's contents.
+            // Image on left fixed 64x64, size label below it; price & rating pinned to trailing
+            if let imgView = card.imageView {
+                NSLayoutConstraint.activate([
+                    imgView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 8),
+                    imgView.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
+                    imgView.widthAnchor.constraint(equalToConstant: 64),
+                    imgView.heightAnchor.constraint(equalToConstant: 64)
+                ])
+
+                // Size label sits under the image, nudged slightly right (so it doesn't overlap with image edge)
+                NSLayoutConstraint.activate([
+                    sizeLabel.topAnchor.constraint(equalTo: imgView.bottomAnchor, constant: 6),
+                    sizeLabel.leadingAnchor.constraint(equalTo: imgView.leadingAnchor, constant: 6),
+                    sizeLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -8)
+                ])
+            } else {
+                // fallback anchors if imageView not present
+                NSLayoutConstraint.activate([
+                    sizeLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
+                    sizeLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 8),
+                    sizeLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -8)
+                ])
+            }
+
+            // Price & rating pinned to card's trailing
+            NSLayoutConstraint.activate([
+                priceLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -8),
+                priceLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+                priceLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 110),
+
+                ratingLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -8),
+                ratingLabel.topAnchor.constraint(equalTo: priceLabel.bottomAnchor, constant: 4),
+                ratingLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 110)
+            ])
+
+            // Place title UNDER rating (as requested). Title aligns to the same trailing as price/rating,
+            // and its leading is at least after the image so it doesn't overlap.
+            if let tLabel = card.titleLabel {
+                NSLayoutConstraint.activate([
+                    tLabel.topAnchor.constraint(equalTo: ratingLabel.bottomAnchor, constant: 6),
+                    tLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -8),
+                    tLabel.leadingAnchor.constraint(greaterThanOrEqualTo: (card.imageView?.trailingAnchor ?? card.leadingAnchor), constant: 12)
+                ])
+            }
+
+            // Set fixed height for card so scroll works predictably (allowing additional sizeLabel height)
+            card.heightAnchor.constraint(equalToConstant: 120).isActive = true
+
+            // Add tap recognizer to place item on tap
             let tap = UITapGestureRecognizer(target: self, action: #selector(paletteItemTapped(_:)))
             card.addGestureRecognizer(tap)
             card.isUserInteractionEnabled = true
+            card.tag = index // map to remoteItems
 
-            // visual defaults
-            card.layer.borderWidth = 0
-            card.layer.borderColor = UIColor.clear.cgColor
-            card.backgroundColor = UIColor(white: 1.0, alpha: 0.0) // transparent by default
+            // Add to stack
+            stack.addArrangedSubview(card)
 
-            // set a small fixed height so scroll content looks consistent
-            card.heightAnchor.constraint(equalToConstant: 72).isActive = true
-
-            paletteStack.addArrangedSubview(card)
+            // Load image2D asynchronously if URL present
+            if let imgURLStr = img2D, let url = URL(string: imgURLStr) {
+                Task.detached(priority: .utility) {
+                    do {
+                        let (data, _) = try await URLSession.shared.data(from: url)
+                        if let image = UIImage(data: data) {
+                            await MainActor.run {
+                                card.imageView?.image = image
+                                card.imageView?.contentMode = .scaleAspectFill
+                            }
+                        }
+                    } catch {
+                        if self.enablePanDebugPrints { print("PAL: failed to load image2D for item[\(index)] -> \(error.localizedDescription)") }
+                    }
+                }
+            }
         }
 
-        // if empty, show a helpful label
-        if types.isEmpty {
-            let lbl = UILabel()
-            lbl.translatesAutoresizingMaskIntoConstraints = false
-            lbl.text = "No objects"
-            lbl.textColor = .white
-            lbl.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-            lbl.textAlignment = .center
-            lbl.heightAnchor.constraint(equalToConstant: 44).isActive = true
-            paletteStack.addArrangedSubview(lbl)
-        }
+        // Update scroll content layout after adding all cards
+        scroll.setNeedsLayout()
+        scroll.layoutIfNeeded()
 
-        // Ensure palette scroll view content is updated
-        paletteScrollView?.setNeedsLayout()
-        paletteScrollView?.layoutIfNeeded()
+        if enablePanDebugPrints {
+            print("PAL: populatePaletteItems -> added \(items.count) items")
+        }
     }
+
+    private func showLoading(_ show: Bool, message: String?) {
+        // Use a single activity indicator attached to the top-right (near palette button) or center if not available.
+        let loaderTag = 0xDEAD_BEEF
+        if show {
+            // if already present, update
+            if let existing = view.viewWithTag(loaderTag) as? UIActivityIndicatorView {
+                existing.startAnimating()
+                if let msg = message { self.infoView.set(title: msg) }
+                return
+            }
+
+            let indicator = UIActivityIndicatorView(style: .large)
+            indicator.translatesAutoresizingMaskIntoConstraints = false
+            indicator.tag = loaderTag
+            indicator.startAnimating()
+            indicator.hidesWhenStopped = true
+            indicator.color = .white
+
+            // a subtle dark blurred background circle to ensure visibility
+            let bg = UIView()
+            bg.translatesAutoresizingMaskIntoConstraints = false
+            bg.backgroundColor = UIColor(white: 0.0, alpha: 0.5)
+            bg.layer.cornerRadius = 28
+            bg.clipsToBounds = true
+            bg.tag = loaderTag + 1
+
+            bg.addSubview(indicator)
+            view.addSubview(bg)
+
+            // place near top-right under the palette button if present; otherwise center
+            if let paletteBtn = paletteButton, paletteBtn.superview != nil {
+                NSLayoutConstraint.activate([
+                    bg.trailingAnchor.constraint(equalTo: paletteBtn.leadingAnchor, constant: -12),
+                    bg.centerYAnchor.constraint(equalTo: paletteBtn.centerYAnchor),
+                    bg.widthAnchor.constraint(equalToConstant: 56),
+                    bg.heightAnchor.constraint(equalToConstant: 56),
+
+                    indicator.centerXAnchor.constraint(equalTo: bg.centerXAnchor),
+                    indicator.centerYAnchor.constraint(equalTo: bg.centerYAnchor)
+                ])
+            } else {
+                NSLayoutConstraint.activate([
+                    bg.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                    bg.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                    bg.widthAnchor.constraint(equalToConstant: 100),
+                    bg.heightAnchor.constraint(equalToConstant: 100),
+
+                    indicator.centerXAnchor.constraint(equalTo: bg.centerXAnchor),
+                    indicator.centerYAnchor.constraint(equalTo: bg.centerYAnchor)
+                ])
+            }
+
+            if let msg = message { self.infoView.set(title: msg) }
+        } else {
+            // hide & remove
+            if let existing = view.viewWithTag(loaderTag) as? UIActivityIndicatorView {
+                existing.stopAnimating()
+                existing.removeFromSuperview()
+            }
+            if let bg = view.viewWithTag(loaderTag + 1) {
+                bg.removeFromSuperview()
+            }
+        }
+    }
+
 
     private func setPaletteCollapsed(_ collapsed: Bool, animated: Bool) {
         // If already in requested state, do nothing
@@ -1035,6 +1687,23 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             return
         }
 
+        let idx = card.tag
+
+        // If we have remoteItems (results from search/upload), prefer placing remote 3D model
+        if idx >= 0 && idx < remoteItems.count {
+            let dict = remoteItems[idx]
+            if let remote3D = dict["imageLink3D"] as? String, let url = URL(string: remote3D) {
+                if enablePanDebugPrints { print("PAL: paletteItemTapped -> downloading remote 3D for index \(idx) -> \(remote3D)") }
+                // Show a small loader
+                showLoading(true, message: "Loading model...")
+                Task {
+                    await placeRemoteModel(at: idx)
+                }
+                return
+            }
+        }
+
+        // Fallback: previous behavior (local VirtualObjectType mapping)
         // Recompute types in the same order used by populatePaletteItems()
         let types: [VirtualObjectType]
         if let _ = (VirtualObjectType.self as? CaseIterable.Type) {
@@ -1047,24 +1716,22 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             }
         }
 
-        let idx = card.tag
-        guard idx >= 0 && idx < types.count else {
-            if enablePanDebugPrints { print("PAL: paletteItemTapped - invalid index \(idx)") }
+        guard card.tag >= 0 && card.tag < types.count else {
+            if enablePanDebugPrints { print("PAL: paletteItemTapped - invalid index \(card.tag)") }
             return
         }
 
-        let selectedType = types[idx]
-        if enablePanDebugPrints { print("PAL: paletteItemTapped -> selected \(selectedType.rawValue) (index \(idx))") }
+        let selectedType = types[card.tag]
+        if enablePanDebugPrints { print("PAL: paletteItemTapped -> selected \(selectedType.rawValue) (index \(card.tag))") }
 
         // Save selection for the "Place Item" button to use later
         selectedTypeForPlacement = selectedType
 
-        // Clear visual selection on all cards (no dependency on FloatingPaletteView API)
+        // Clear visual selection on all cards
         paletteStack.arrangedSubviews.forEach { sub in
             if let c = sub as? VirtualObjectCardView {
                 c.layer.borderWidth = 0
                 c.layer.borderColor = UIColor.clear.cgColor
-                // optional: reset background
                 c.backgroundColor = UIColor(white: 1.0, alpha: 0.0)
             }
         }
@@ -1078,7 +1745,111 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         setPaletteCollapsed(true, animated: true)
     }
 
+    private func placeRemoteModel(at index: Int) async {
+        guard index >= 0 && index < remoteItems.count else {
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "Invalid item")
+            }
+            return
+        }
 
+        let dict = remoteItems[index]
+        guard let remote3D = dict["imageLink3D"] as? String, let url = URL(string: remote3D) else {
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "No 3D link")
+            }
+            return
+        }
+
+        // Download to temp file
+        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).appendingPathExtension(url.pathExtension)
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                await MainActor.run {
+                    self.showLoading(false, message: nil)
+                    self.infoView.set(title: "Model download failed: HTTP \(http.statusCode)")
+                }
+                return
+            }
+            try data.write(to: tmpURL, options: .atomic)
+        } catch {
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "Download error")
+                if self.enablePanDebugPrints { print("PAL: failed to download 3D -> \(error.localizedDescription)") }
+            }
+            return
+        }
+
+        // Try to load the model using SceneKit's URL-based loader
+        do {
+            // Attempt to create a SCNScene directly from the file URL.
+            // This works for many supported formats. If SceneKit can't parse it, it'll throw and we'll show an error.
+            let scene = try SCNScene(url: tmpURL, options: nil)
+
+            // Create a container node and attach all children from scene.rootNode
+            let container = SCNNode()
+            for child in scene.rootNode.childNodes {
+                container.addChildNode(child)
+            }
+
+            // Simple bounding and scale normalization - optional small auto-scale
+            let (minVec, maxVec) = container.boundingBox
+            let size = SCNVector3(
+                x: maxVec.x - minVec.x,
+                y: maxVec.y - minVec.y,
+                z: maxVec.z - minVec.z
+            )
+            let maxSide = max(size.x, max(size.y, size.z))
+            if maxSide > 0 {
+                // target ~0.5m largest dimension (tweak as required)
+                let desired: Float = 0.5
+                let scale = desired / maxSide
+                container.scale = SCNVector3(scale, scale, scale)
+            }
+
+            // Place the model roughly 0.6m in front of the camera (screen center)
+            var placementPosition = SCNVector3(0, 0, -0.6)
+            if let pov = sceneView.pointOfView {
+                // convert local forward point to world
+                let local = SCNVector3(0, 0, -0.6)
+                let worldPos = pov.convertPosition(local, to: sceneView.scene.rootNode)
+                placementPosition = worldPos
+                // align orientation with camera yaw
+                container.eulerAngles.y = pov.eulerAngles.y
+            }
+
+            container.position = placementPosition
+
+            // Add a unique name so selection / deletion logic can operate
+            container.name = "remoteModel_\(UUID().uuidString)"
+
+            // Add to scene on main thread
+            await MainActor.run {
+                self.sceneView.scene.rootNode.addChildNode(container)
+                // set selection to the newly placed node and update UI
+                self.selectedNode = container
+                self.highlight(node: container, highlight: true)
+                self.addPlacedItem(dict)
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: dict["itemName"] as? String ?? "Model placed")
+                if self.enablePanDebugPrints { print("PAL: placed remote model from \(remote3D)") }
+
+                // Optionally collapse palette after placing
+                self.setPaletteCollapsed(true, animated: true)
+            }
+        } catch {
+            // If SceneKit couldn't load it, surface a clear error and log for debugging
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "Model load failed")
+                if self.enablePanDebugPrints { print("PAL: SCNScene(url:) failed -> \(error.localizedDescription). File: \(tmpURL.path)") }
+            }
+        }
+    }
 
     // Helper: very small mapping function — replace with your project's mapping
     private func virtualObjectType(forDisplayName name: String) -> VirtualObjectType? {
@@ -1092,7 +1863,287 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
         return nil
     }
+    
+    // add this exact method inside the VirtualObjectViewController class
+    @MainActor
+    func callSearchAPI(macIP: String, prompt: String) async -> Data? {
+        // Build URL safely using URLComponents
+        var comps = URLComponents()
+        comps.scheme = "http"
+        comps.host = macIP
+        comps.port = 8093
+        comps.path = "/prompt-search" // your search endpoint; replace if different
 
+        guard let url = comps.url else {
+            if enablePanDebugPrints { print("SEARCH: invalid URL for macIP=\(macIP) prompt=\(prompt)") }
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // JSON payload: { "request": "<prompt>" }
+        let payload: [String: String] = ["request": prompt]
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            if enablePanDebugPrints { print("SEARCH: failed to encode JSON payload -> \(error.localizedDescription)") }
+            return nil
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                if enablePanDebugPrints { print("SEARCH: server returned HTTP \(http.statusCode)") }
+                return nil
+            }
+
+            return data
+        } catch {
+            if enablePanDebugPrints { print("SEARCH: network error -> \(error.localizedDescription)") }
+            return nil
+        }
+    }
+
+    
+    // add this exact method inside the VirtualObjectViewController class
+    @objc func onSearchButtonTapped(_ sender: Any) {
+        // Replace "192.168.1.10" with your Mac's LAN IP at runtime or read from a settings field.
+        // If you already store macIP somewhere (e.g. a property), use that instead.
+        let macIP = self.getMacIP() // <-- Change this to your Mac's IP when testing
+
+        // If you have a UISearchBar property named `searchBar`, use it. Otherwise replace with your text source.
+        let promptText: String
+        if let sb = (self.value(forKey: "searchBar") as? UISearchBar) {
+            promptText = sb.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        } else {
+            // fallback: try a stored property named `searchTextField` or default
+            promptText = ""
+        }
+
+        guard !promptText.isEmpty else {
+            // optional: show a toast / info view instead of silently returning
+            print("Search: prompt empty — ignoring")
+            return
+        }
+
+        // Show loading UI if you have one (e.g., infoView or ProgressView)
+        DispatchQueue.main.async {
+            self.infoView.set(title: "Searching...")
+        }
+
+        Task { @MainActor in
+            let result = await callSearchAPI(macIP: macIP, prompt: promptText)
+
+            // update UI with the server response
+            // e.g., set info view text or a label you use for responses
+            self.infoView.set(title: "Server: \(result)")
+
+            // optional debug log
+            if self.enablePanDebugPrints { print("SEARCH: result = \(result)") }
+        }
+    }
+    
+    @MainActor
+    func uploadImageToMacAPI(macIP: String, imageData: Data) async -> Data? {
+        // NOTE: change `/upload-image` to the endpoint your server expects for uploads.
+        var comps = URLComponents()
+        comps.scheme = "http"
+        comps.host = macIP
+        comps.port = 8093
+        comps.path = "/upload-image"
+
+        guard let url = comps.url else {
+            if enablePanDebugPrints { print("UPLOAD: invalid URL for macIP=\(macIP)") }
+            return nil
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 60
+
+        var body = Data()
+        let filename = "photo.jpg"
+        let mimetype = "image/jpeg"
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimetype)\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                if enablePanDebugPrints { print("UPLOAD: server returned HTTP \(http.statusCode)") }
+                return nil
+            }
+
+            return data
+        } catch {
+            if enablePanDebugPrints { print("UPLOAD: network error -> \(error.localizedDescription)") }
+            return nil
+        }
+    }
+    
+    private func setupCartUI() {
+        // Build a small cart button with badge and a price label under it
+        let btn = UIButton(type: .system)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.accessibilityIdentifier = "cartButton"
+        if #available(iOS 13.0, *) {
+            let cfg = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+            btn.setImage(UIImage(systemName: "cart.fill", withConfiguration: cfg), for: .normal)
+        } else {
+            btn.setTitle("Cart", for: .normal)
+        }
+        btn.tintColor = .white
+        btn.backgroundColor = UIColor(white: 0.0, alpha: 0.45)
+        btn.layer.cornerRadius = 8
+        btn.layer.masksToBounds = true
+        btn.addTarget(self, action: #selector(cartButtonTapped(_:)), for: .touchUpInside)
+
+        view.addSubview(btn)
+        self.cartButton = btn
+
+        // Badge
+        let badge = UILabel()
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        badge.textColor = .white
+        badge.backgroundColor = .systemRed
+        badge.textAlignment = .center
+        badge.layer.cornerRadius = 10
+        badge.clipsToBounds = true
+        badge.isHidden = true // hidden when 0
+        view.addSubview(badge)
+        self.cartBadgeLabel = badge
+
+        // Total price label
+        let totalLbl = UILabel()
+        totalLbl.translatesAutoresizingMaskIntoConstraints = false
+        totalLbl.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        totalLbl.textColor = .white
+        totalLbl.textAlignment = .center
+        totalLbl.numberOfLines = 1
+        totalLbl.text = "" // initially empty
+        view.addSubview(totalLbl)
+        self.cartTotalLabel = totalLbl
+
+        // Positioning:
+        // If palette button exists, place cart left to palette; otherwise top-right safe area
+        if let paletteBtn = self.paletteButton, paletteBtn.superview != nil {
+            NSLayoutConstraint.activate([
+                btn.trailingAnchor.constraint(equalTo: paletteBtn.leadingAnchor, constant: -12),
+                btn.topAnchor.constraint(equalTo: paletteBtn.topAnchor),
+                btn.widthAnchor.constraint(equalToConstant: 44),
+                btn.heightAnchor.constraint(equalToConstant: 44)
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                btn.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -defaultPadding * 1.5),
+                btn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: defaultPadding * 1.0),
+                btn.widthAnchor.constraint(equalToConstant: 44),
+                btn.heightAnchor.constraint(equalToConstant: 44)
+            ])
+        }
+
+        // Badge anchored top-right of button
+        NSLayoutConstraint.activate([
+            badge.centerXAnchor.constraint(equalTo: btn.trailingAnchor, constant: -6),
+            badge.centerYAnchor.constraint(equalTo: btn.topAnchor, constant: 6),
+            badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+            badge.heightAnchor.constraint(equalToConstant: 20)
+        ])
+
+        // Total label below the button (small)
+        NSLayoutConstraint.activate([
+            totalLbl.topAnchor.constraint(equalTo: btn.bottomAnchor, constant: 6),
+            totalLbl.centerXAnchor.constraint(equalTo: btn.centerXAnchor),
+            totalLbl.widthAnchor.constraint(lessThanOrEqualToConstant: 160)
+        ])
+
+        // Initial update
+        updateCartUI()
+    }
+    
+    @objc private func cartButtonTapped(_ sender: Any?) {
+        // Present a simple list or summary — for now, just print debug and show infoView.
+        if enablePanDebugPrints { print("CART: tapped, items=\(placedItems.count)") }
+        if placedItems.isEmpty {
+            infoView.set(title: "Cart is empty")
+        } else {
+            // Show summary: count + total
+            let totalText = cartTotalLabel.text ?? ""
+            infoView.set(title: "Items: \(placedItems.count) • \(totalText)")
+        }
+    }
+
+    private func updateCartUI() {
+        // Compute total price and unit (use first non-empty unit found)
+        var total: Double = 0
+        var unit: String? = nil
+        for item in placedItems {
+            if let p = item["price"] as? NSNumber {
+                total += p.doubleValue
+            } else if let p = item["price"] as? Double {
+                total += p
+            }
+            if unit == nil {
+                if let u = item["priceUnit"] as? String, !u.isEmpty {
+                    unit = u
+                }
+            }
+        }
+
+        // Update badge
+        if placedItems.isEmpty {
+            cartBadgeLabel.isHidden = true
+        } else {
+            cartBadgeLabel.isHidden = false
+            cartBadgeLabel.text = "\(placedItems.count)"
+        }
+
+        // Update total label (rounded to 2 decimals if needed; prefer integer when no fraction)
+        if placedItems.isEmpty {
+            cartTotalLabel.text = ""
+        } else {
+            let rounded = (total.truncatingRemainder(dividingBy: 1) == 0) ? String(format: "%.0f", total) : String(format: "%.2f", total)
+            if let u = unit {
+                cartTotalLabel.text = "\(rounded) \(u)"
+            } else {
+                cartTotalLabel.text = "\(rounded)"
+            }
+        }
+    }
+
+    private func addPlacedItem(_ item: [String: Any]) {
+        placedItems.append(item)
+        updateCartUI()
+        if enablePanDebugPrints { print("CART: added item -> now \(placedItems.count) items, total=\(cartTotalLabel.text ?? "")") }
+    }
+
+    private func removePlacedItem(at index: Int) {
+        guard index >= 0 && index < placedItems.count else { return }
+        placedItems.remove(at: index)
+        updateCartUI()
+        if enablePanDebugPrints { print("CART: removed item -> now \(placedItems.count) items") }
+    }
+
+
+
+    // VirtualObjectViewController.swift
+    // central place to read Mac IP (change default as needed or make this read from user settings)
+    func getMacIP() -> String {
+        // TODO: replace with a stored setting or UI input later; hard-coded for now.
+        return "172.20.10.3"
+    }
 
 }
 
@@ -1180,4 +2231,3 @@ private extension SCNVector3 {
         return SCNVector3(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z)
     }
 }
-
