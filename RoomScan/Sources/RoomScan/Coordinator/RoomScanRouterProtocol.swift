@@ -12,5 +12,7 @@ public protocol RoomScanRouterProtocol {
     func presentShareSheet(for items: [URL])
 
     func showErrorPopup(for type: RoomScanErrorType)
+    
+    func presentRedesignUI(for scanURL: URL)
 
 }

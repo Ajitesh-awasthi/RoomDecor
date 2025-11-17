@@ -74,9 +74,21 @@ public class RoomScanLandingViewController: UIViewController {
             }
             .store(in: &disposables)
 
+        // ✅ FIX: Correctly call redesignButtonTapped when item is selected
         onItemSelectedSubject
             .sink { [weak self] item in
-                self?.presenter.presentShareSheet(for: [item.url])
+                guard let self = self else { return }
+                
+                print("🎯 Redesign button tapped for scan: \(item.url.lastPathComponent)")
+                
+                // Verify file exists before navigating
+                guard FileManager.default.fileExists(atPath: item.url.path) else {
+                    print("❌ ERROR: Scan file doesn't exist at: \(item.url.path)")
+                    return
+                }
+                
+                print("✅ File exists, navigating to redesign...")
+                self.presenter.redesignButtonTapped(for: item)
             }
             .store(in: &disposables)
 
@@ -127,9 +139,11 @@ public class RoomScanLandingViewController: UIViewController {
                         for: indexPath) as? RoomScanCell
                 else { return nil }
 
+                // ✅ FIX: When share/redesign button is tapped in cell, send item to subject
                 cell
                     .shareTapped
                     .sink { [weak self] _ in
+                        print("📱 Cell button tapped for: \(item.url.lastPathComponent)")
                         self?.onItemSelectedSubject.send(item)
                     }
                     .store(in: &cell.disposables)

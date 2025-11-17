@@ -33,6 +33,10 @@ public class RoomScanLandingPresenter {
     func presentShareSheet(for items: [URL]) {
         appRouter.presentShareSheet(for: items)
     }
+    
+    func redesignButtonTapped(for model: RoomScanViewModel) {
+            appRouter.presentRedesignUI(for: model.url)
+        }
 
 }
 

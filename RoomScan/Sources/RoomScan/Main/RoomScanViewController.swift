@@ -13,12 +13,13 @@ public class RoomScanViewController: UIViewController {
     var roomCaptureView: RoomCaptureView!
     var saveButton: UIButton!
     var saveLoadingIndicator: UIActivityIndicatorView!
-    var shareButton: UIButton!
+    var shareButton: UIButton!  // ✅ Keep name for compatibility
     var shareLoadingIndicator: UIActivityIndicatorView!
 
     private var disposables = Set<AnyCancellable>()
     private let presenter: RoomScanPresenter!
     private var capturedRoom: CapturedRoom?
+    private var savedFileURL: URL?  // ✅ Store the saved file URL
 
     private var buttonTappedSubject = PassthroughSubject<ActionType, Never>()
 
@@ -76,13 +77,30 @@ public class RoomScanViewController: UIViewController {
             }
             .store(in: &disposables)
 
+        // ✅ FIX: Change shareButton behavior to navigate to redesign
         shareButton
             .throttledTap()
             .sink { [weak self] _ in
                 guard let self else { return }
-
-                self.showLoader(for: .share)
-                self.buttonTappedSubject.send(.share)
+                
+                print("🎨 Redesign button tapped!")
+                
+                // Make sure we have a saved file
+                guard let fileURL = self.savedFileURL else {
+                    print("❌ No saved file available yet!")
+                    return
+                }
+                
+                // Verify file exists
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    print("❌ Saved file doesn't exist: \(fileURL.path)")
+                    return
+                }
+                
+                print("✅ Navigating to redesign with file: \(fileURL.lastPathComponent)")
+                
+                // Navigate to redesign UI
+                self.presenter.appRouter.presentRedesignUI(for: fileURL)
             }
             .store(in: &disposables)
 
@@ -94,7 +112,8 @@ public class RoomScanViewController: UIViewController {
                 case .save:
                     self.saveTapped()
                 case .share:
-                    self.shareTapped()
+                    // No longer used - redesign button handles this directly
+                    break
                 }
             }
             .store(in: &disposables)
@@ -109,22 +128,52 @@ public class RoomScanViewController: UIViewController {
     }
 
     private func saveTapped() {
+        print("\n💾 === SAVE BUTTON TAPPED ===")
         saveRoomScan()
         stopSession()
         saveButton.isHidden = true
         hideLoader(for: .save)
     }
 
-    private func shareTapped() {
-        presenter.presentShareSheet()
-        hideLoader(for: .share)
-    }
-
     private func saveRoomScan() {
+        print("💾 Starting save process...")
+        
+        guard let capturedRoom = capturedRoom else {
+            print("❌ ERROR: No captured room to save!")
+            presenter.showErrorPopup(for: .save)
+            return
+        }
+        
+        let url = presenter.exportUrl
+        print("📁 Export URL: \(url.path)")
+        print("📁 Filename: \(url.lastPathComponent)")
+        
         do {
-            let url = presenter.exportUrl
-            try capturedRoom?.export(to: url)
+            print("💾 Exporting room to file...")
+            try capturedRoom.export(to: url)
+            print("✅ Export completed successfully!")
+            
+            // Verify file was created
+            if FileManager.default.fileExists(atPath: url.path) {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                   let size = attrs[.size] as? Int64 {
+                    print("✅ File saved successfully!")
+                    print("📦 File size: \(size) bytes")
+                    
+                    // ✅ Store the saved file URL for later use
+                    self.savedFileURL = url
+                    
+                    if size == 0 {
+                        print("⚠️ WARNING: File size is 0 bytes!")
+                    }
+                }
+            } else {
+                print("❌ ERROR: File doesn't exist after export!")
+            }
+            
         } catch {
+            print("❌ ERROR: Failed to export room!")
+            print("❌ Error details: \(error.localizedDescription)")
             presenter.showErrorPopup(for: .save)
         }
     }
@@ -162,20 +211,28 @@ extension RoomScanViewController: RoomCaptureSessionDelegate {
 
     public func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
         capturedRoom = room
+        print("🔄 Room updated - ready to save")
         DispatchQueue.main.async {
             self.presenter.isReadyToSave = true
         }
     }
 
     public func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: (any Error)?) {
+        print("\n🏁 === CAPTURE SESSION ENDED ===")
+        
         DispatchQueue.main.async {
             guard error == nil else {
+                print("❌ Session ended with error: \(error!.localizedDescription)")
                 self.presenter.showErrorPopup(for: .session)
                 return
             }
 
+            print("✅ Session ended successfully")
+            
+            // ✅ FIX: Show button (don't auto-save again!)
             UIView.animate(withDuration: 0.2, delay: 1.5) {
                 self.shareButton.layer.opacity = 1
+                print("✅ Redesign button now visible")
             }
         }
     }

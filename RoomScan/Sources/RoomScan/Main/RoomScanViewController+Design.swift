@@ -22,7 +22,7 @@ extension RoomScanViewController {
         saveLoadingIndicator = UIActivityIndicatorView(style: .large)
         saveButton.addSubview(saveLoadingIndicator)
 
-        shareButton = UIButton()
+        shareButton = UIButton()  // ✅ Keep original name
         view.addSubview(shareButton)
 
         shareLoadingIndicator = UIActivityIndicatorView(style: .large)
@@ -38,9 +38,10 @@ extension RoomScanViewController {
         saveButton.roundAllCorners(withRadius: cornerRadius)
         saveButton.isHidden = true
 
-        shareButton.setTitle(CoreUi.LocalizableStrings.share.localized, for: .normal)
+        // ✅ Changed label and color, but kept variable name
+        shareButton.setTitle("Redesign", for: .normal)
         shareButton.setTitleColor(.white, for: .normal)
-        shareButton.backgroundColor = .black
+        shareButton.backgroundColor = .systemGreen  // Changed to green
         shareButton.roundAllCorners(withRadius: cornerRadius)
         shareButton.layer.opacity = 0
     }

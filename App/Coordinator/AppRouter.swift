@@ -5,6 +5,8 @@ import CoreUi
 import RoomScan
 import SwiftUI
 import VirtualObject
+import SwiftUI
+import RoomRedesign
 
 class AppRouter:
     NSObject,
@@ -87,6 +89,46 @@ class AppRouter:
     }
 
 
+    func presentRedesignUI(for scanURL: URL) {
+        print("\n🎯 === PRESENTING REDESIGN UI ===")
+        print("📁 Scan URL: \(scanURL.path)")
+        print("📁 Filename: \(scanURL.lastPathComponent)")
+        print("📁 File exists? \(FileManager.default.fileExists(atPath: scanURL.path))")
+        
+        // Verify file exists before presenting
+        guard FileManager.default.fileExists(atPath: scanURL.path) else {
+            print("❌ ERROR: File doesn't exist, cannot present redesign UI")
+            
+            // List files in Documents to debug
+            if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                print("\n📂 Files in Documents directory:")
+                do {
+                    let files = try FileManager.default.contentsOfDirectory(at: documentsURL, includingPropertiesForKeys: nil)
+                    for file in files {
+                        print("  - \(file.lastPathComponent)")
+                    }
+                } catch {
+                    print("❌ Error listing files: \(error)")
+                }
+            }
+            
+            // Show error to user
+            showError(for: .roomScanLoad)
+            return
+        }
+        
+        print("✅ File verified, creating ContentView...")
+        
+        let contentView = ContentView(scanURL: scanURL)
+        let hostingController = UIHostingController(rootView: contentView)
+        hostingController.modalPresentationStyle = .fullScreen
+        
+        print("✅ Presenting RoomRedesign UI...")
+        self.navigationController.present(hostingController, animated: true) {
+            print("✅ RoomRedesign UI presented successfully")
+        }
+    }
+    
     func showVirtualObjectLandingViewController() {
         let virtualObjectLandingViewController: VirtualObjectLandingViewController = container.resolve()
         replaceLastViewController(with: virtualObjectLandingViewController)
