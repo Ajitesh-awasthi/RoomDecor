@@ -3,6 +3,7 @@ import Combine
 import UIKit
 import Core
 import CoreUi
+import ModelIO
 
 public class VirtualObjectViewController: UIViewController, UIGestureRecognizerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UISearchBarDelegate {
 
@@ -22,7 +23,9 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     private var remoteItems: [[String: Any]] = []
     // Cart UI + placed items tracking
     private var cartButton: UIButton!
-    private var cartBadgeLabel: UILabel!
+    private var cartBadgeLabel: UILabel?
+    private var cartPriceLabel: UILabel?
+    private var cartContainerView: UIView?
     private var cartTotalLabel: UILabel!
     private var placedItems: [[String: Any]] = []
 
@@ -35,6 +38,9 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     // add near other UI vars
     private var searchCameraButton: UIButton?
 
+    // Price-label overlays for placed nodes
+    private var priceLabelMap: [ObjectIdentifier: UILabel] = [:]
+    // reliable refs for cart UI (preferred over viewWithTag lookups)
 
     // Palette sizing
     private let paletteCollapsedWidth: CGFloat = 56
@@ -43,6 +49,9 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     // floating palette
     private var palette: FloatingPaletteView?
     private var selectedTypeForPlacement: VirtualObjectType? = nil
+    // staging / caching for remote models
+    private var pendingRemoteIndex: Int? = nil                      // index of remoteItems staged for placement
+    private var remoteModelLocalURLs: [Int: URL] = [:]              // downloaded local model file URLs keyed by remoteItems index
 
     // remember the user's current selection from the palette — used when user presses "Add"
     private var pendingSelectedType: VirtualObjectType?
@@ -58,8 +67,8 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     // add near other UI vars
     internal var backButton: UIButton!
     internal var paletteToggleButton: UIButton!
+    private var isPlacingRemoteIndex = Set<Int>()
 
-    
     // --- safety / highlight / gestures state ---
     private var originalScales: [ObjectIdentifier: SCNVector3] = [:]
 
@@ -208,7 +217,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         if #available(iOS 15.0, *) {
             var cfg = UIButton.Configuration.filled()
             cfg.title = LocalizableStrings.addVirtualObject.localized
-            cfg.baseBackgroundColor = .black
+            cfg.baseBackgroundColor = UIColor(white: 0.0, alpha: 0.45)
             cfg.baseForegroundColor = .white
             cfg.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
             virtualObjectButton.configuration = cfg
@@ -223,7 +232,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         view.addSubview(virtualObjectButton)
 
         NSLayoutConstraint.activate([
-            virtualObjectButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            virtualObjectButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: defaultPadding * 2),
             virtualObjectButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -defaultPadding * 2),
             virtualObjectButton.heightAnchor.constraint(equalToConstant: buttonHeight),
             virtualObjectButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140)
@@ -364,8 +373,37 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             .throttledTap()
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                
-                // Decide which type to place: preference to selectedTypeForPlacement (set by palette tap)
+
+                // 1) If a remote item is staged, place it from the cached local URL (or download if missing)
+                if let stagedIndex = self.pendingRemoteIndex {
+                    if self.enablePanDebugPrints { print("DBG: Place button tapped with staged remote index = \(stagedIndex)") }
+
+                    // If we already downloaded model to local file, use it. Otherwise download then place.
+                    if let local = self.remoteModelLocalURLs[stagedIndex] {
+                        if self.enablePanDebugPrints { print("DBG: placing staged remote model from local url \(local)") }
+                        Task {
+                            await self.placeRemoteModelFromLocal(index: stagedIndex, localURL: local)
+                        }
+                    } else {
+                        // show loader while downloading, then place
+                        if self.enablePanDebugPrints { print("DBG: no cached model for staged index -> downloading now") }
+                        self.showLoading(true, message: "Downloading model...")
+                        Task {
+                            await self.downloadRemoteModelAndStage(index: stagedIndex)
+                            self.showLoading(false, message: nil)
+                            if let local = self.remoteModelLocalURLs[stagedIndex] {
+                                await self.placeRemoteModelFromLocal(index: stagedIndex, localURL: local)
+                            } else {
+                                await MainActor.run {
+                                    self.infoView.set(title: "Model download failed")
+                                }
+                            }
+                        }
+                    }
+                    return
+                }
+
+                // 2) Fallback: existing behavior - place presenter's default or selected virtual type
                 if let selected = self.selectedTypeForPlacement {
                     if self.enablePanDebugPrints { print("DBG: placing selected type = \(selected)") }
                     self.presenter.addVirtualObject(ofType: selected, screenCenter: self.screenCenter, sceneView: self.sceneView)
@@ -375,6 +413,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 }
             }
             .store(in: &disposables)
+
         
         // Plane detection publisher (unchanged behaviour, kept here)
         horizontalPlaneDetected
@@ -882,6 +921,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                     print("PAN: delete badge tapped — removing model node named \(toRemove.name ?? "<unknown>")")
                     // request presenter to remove and cleanup
                     presenter.removeVirtualObject(node: toRemove)
+                    self.removePriceLabel(for: toRemove)
                 } else {
                     print("PAN: delete badge tapped but parent model not found")
                 }
@@ -962,6 +1002,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
 
             // Ask presenter to do any cleanup / bookkeeping
             self.presenter.removeVirtualObject(node: nodeToRemove)
+            self.removePriceLabel(for: nodeToRemove)
 
             // Remove from scene safely on main thread
             DispatchQueue.main.async {
@@ -1680,6 +1721,162 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
 
+    /// The corrected placeRemoteModel implementation (async)
+    private func placeRemoteModel(at index: Int) async {
+        guard index >= 0 && index < remoteItems.count else {
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "Invalid item")
+            }
+            return
+        }
+
+        if isPlacingRemoteIndex.contains(index) {
+            if enablePanDebugPrints {
+                print("PAL: already placing remote index \(index), ignoring duplicate tap")
+            }
+            return
+        }
+        isPlacingRemoteIndex.insert(index)
+
+        let dict = remoteItems[index]
+        guard let remote3D = dict["imageLink3D"] as? String,
+              let url = URL(string: remote3D) else {
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "No 3D link")
+            }
+            isPlacingRemoteIndex.remove(index)
+            return
+        }
+
+        if enablePanDebugPrints {
+            print("PAL: starting download for \(url.absoluteString)")
+        }
+
+        // download to temp file
+        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(url.pathExtension)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                await MainActor.run {
+                    self.showLoading(false, message: nil)
+                    self.infoView.set(title: "Model download failed: HTTP \(http.statusCode)")
+                }
+                isPlacingRemoteIndex.remove(index)
+                return
+            }
+            try data.write(to: tmpURL, options: .atomic)
+        } catch {
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "Download error")
+                if self.enablePanDebugPrints {
+                    print("PAL: failed to download 3D -> \(error.localizedDescription)")
+                }
+            }
+            isPlacingRemoteIndex.remove(index)
+            return
+        }
+
+        // load scene from the temp file (works for .usdz/.scn/.dae/.glb)
+        do {
+            let sceneFromURL = try SCNScene(url: tmpURL, options: nil)
+
+            // container node (single handle)
+            let container = SCNNode()
+            for child in sceneFromURL.rootNode.childNodes {
+                container.addChildNode(child)
+            }
+
+            // compute bounding box (in container space)
+            let (minB, maxB) = recursiveBoundingBox(for: container)
+            let size = SCNVector3(x: maxB.x - minB.x,
+                                  y: maxB.y - minB.y,
+                                  z: maxB.z - minB.z)
+            let maxSide = max(size.x, max(size.y, size.z))
+
+            // normalize scale to a reasonable size (target ~0.5m for largest dimension)
+            if maxSide > 0.0001 {
+                let desired: Float = 0.5
+                let scale = desired / maxSide
+                container.scale = SCNVector3(scale, scale, scale)
+                if enablePanDebugPrints {
+                    print("PAL: model auto-scaled by \(scale) (maxSide=\(maxSide))")
+                }
+            }
+
+            // placement ~0.6m in front of camera
+            var placementPosition = SCNVector3(0, 0, -0.6)
+            if let pov = sceneView.pointOfView {
+                let worldPos = pov.convertPosition(placementPosition, to: sceneView.scene.rootNode)
+                placementPosition = worldPos
+                container.eulerAngles.y = pov.eulerAngles.y
+            }
+            container.position = placementPosition
+
+            // bookkeeping
+            container.name = "remoteModel_\(UUID().uuidString)"
+            let ud = NSMutableDictionary()
+            ud["remoteIndex"] = index
+            container.setValue(index, forKey: "remoteIndex")
+
+            // add to scene + attach labels on main actor
+            await MainActor.run {
+                self.sceneView.scene.rootNode.addChildNode(container)
+                self.selectedNode = container
+                self.highlight(node: container, highlight: true)
+
+                // attach price label slightly above model top
+                let priceText = self.formatPriceLabelText(from: dict)
+                let priceNode = self.makeBillboardTextNode(text: priceText)
+                let (cMin, cMax) = self.recursiveBoundingBox(for: container)
+                let modelMaxSide = max(cMax.x - cMin.x, max(cMax.y - cMin.y, cMax.z - cMin.z))
+                let offsetY = cMax.y + max(0.02, modelMaxSide * 0.02)
+                priceNode.position = SCNVector3(0, offsetY, 0)
+                container.addChildNode(priceNode)
+
+                if self.enablePanDebugPrints {
+                    print("PAL: attached price label for '\(dict["itemName"] as? String ?? "")' at y=\(offsetY) (modelMaxSide=\(modelMaxSide))")
+                }
+
+                // attach name label under price (per your request)
+                if let itemName = dict["itemName"] as? String {
+                    let nameNode = self.makeBillboardTextNode(text: itemName)
+                    nameNode.position = SCNVector3(0, offsetY - 0.035, 0)
+                    container.addChildNode(nameNode)
+                }
+
+                // bookkeeping + cart update
+                self.addPlacedItem(dict, at: index)
+
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: dict["itemName"] as? String ?? "Model placed")
+                if self.enablePanDebugPrints {
+                    print("PAL: placed remote model from \(remote3D)")
+                }
+
+                self.setPaletteCollapsed(true, animated: true)
+            }
+        } catch {
+            await MainActor.run {
+                self.showLoading(false, message: nil)
+                self.infoView.set(title: "Model load failed")
+                if self.enablePanDebugPrints {
+                    print("PAL: failed to load model -> \(error.localizedDescription)")
+                }
+            }
+            isPlacingRemoteIndex.remove(index)
+            return
+        }
+
+        // done
+        isPlacingRemoteIndex.remove(index)
+    }
+
 
     @objc private func paletteItemTapped(_ gesture: UITapGestureRecognizer) {
         guard let card = gesture.view as? VirtualObjectCardView else {
@@ -1689,22 +1886,58 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
 
         let idx = card.tag
 
-        // If we have remoteItems (results from search/upload), prefer placing remote 3D model
+        // Remote-based selection (results from search/upload)
         if idx >= 0 && idx < remoteItems.count {
             let dict = remoteItems[idx]
             if let remote3D = dict["imageLink3D"] as? String, let url = URL(string: remote3D) {
-                if enablePanDebugPrints { print("PAL: paletteItemTapped -> downloading remote 3D for index \(idx) -> \(remote3D)") }
-                // Show a small loader
-                showLoading(true, message: "Loading model...")
-                Task {
-                    await placeRemoteModel(at: idx)
+                if enablePanDebugPrints { print("PAL: paletteItemTapped -> staging remote 3D for index \(idx) -> \(remote3D)") }
+
+                // 1) Stage the remote index for the Place/Add button to use later
+                pendingRemoteIndex = idx
+
+                // 2) Collapse the palette immediately on main thread so user sees it close
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.setPaletteCollapsed(true, animated: true)
                 }
+
+                // 3) Optionally start an asynchronous pre-download in the background to cache the file
+                //    This will not block UI or the collapse animation.
+                Task.detached(priority: .utility) { [weak self] in
+                    guard let self = self else { return }
+                    if self.enablePanDebugPrints { print("PAL: starting download for \(remote3D)") }
+                    do {
+                        let (data, response) = try await URLSession.shared.data(from: url)
+                        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                            if self.enablePanDebugPrints { print("PAL: download failed HTTP \(http.statusCode) for index \(idx)") }
+                            return
+                        }
+                        // save to temp file for later use by Place button
+                        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                            .appendingPathComponent("remote_\(idx)_\(UUID().uuidString)")
+                            .appendingPathExtension(url.pathExtension)
+                        try data.write(to: tmpURL, options: .atomic)
+
+                        if self.enablePanDebugPrints { print("PAL: downloaded model for index \(idx) -> cached at \(tmpURL.path)") }
+
+                        // store cached path in remoteItems so place action can pick it up later
+                        // thread-safely update remoteItems on main actor
+                        await MainActor.run {
+                            var entry = self.remoteItems[idx]
+                            entry["__cachedLocalURL"] = tmpURL.absoluteString
+                            self.remoteItems[idx] = entry
+                        }
+                    } catch {
+                        if self.enablePanDebugPrints { print("PAL: download error for index \(idx) -> \(error.localizedDescription)") }
+                    }
+                }
+
+                // Done — staged and palette collapsed. The actual placement should happen when user presses Add (your existing flow).
                 return
             }
         }
 
-        // Fallback: previous behavior (local VirtualObjectType mapping)
-        // Recompute types in the same order used by populatePaletteItems()
+        // Fallback: local VirtualObjectType selection path (unchanged except we collapse immediately and stage)
         let types: [VirtualObjectType]
         if let _ = (VirtualObjectType.self as? CaseIterable.Type) {
             types = (VirtualObjectType.allCases as? [VirtualObjectType]) ?? []
@@ -1724,10 +1957,18 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         let selectedType = types[card.tag]
         if enablePanDebugPrints { print("PAL: paletteItemTapped -> selected \(selectedType.rawValue) (index \(card.tag))") }
 
-        // Save selection for the "Place Item" button to use later
+        // Stage for placement (local)
         selectedTypeForPlacement = selectedType
+        pendingSelectedType = selectedType
+        pendingRemoteIndex = nil // clear any staged remote index
 
-        // Clear visual selection on all cards
+        // Collapse palette immediately
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.setPaletteCollapsed(true, animated: true)
+        }
+
+        // Update card visuals
         paletteStack.arrangedSubviews.forEach { sub in
             if let c = sub as? VirtualObjectCardView {
                 c.layer.borderWidth = 0
@@ -1736,120 +1977,147 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             }
         }
 
-        // Visually mark the selected card (simple highlight)
         card.layer.borderWidth = 2
         card.layer.borderColor = UIColor.systemBlue.cgColor
         card.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.08)
-
-        // Collapse palette after selection for clarity (optional)
-        setPaletteCollapsed(true, animated: true)
     }
 
-    private func placeRemoteModel(at index: Int) async {
-        guard index >= 0 && index < remoteItems.count else {
-            await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "Invalid item")
-            }
-            return
-        }
 
+    // Downloads the remote 3D file for given remoteItems index and stores local file URL in remoteModelLocalURLs.
+    // If the file already exists cached, this will be a no-op.
+    private func downloadRemoteModelAndStage(index: Int) async {
+        guard index >= 0 && index < remoteItems.count else { return }
         let dict = remoteItems[index]
-        guard let remote3D = dict["imageLink3D"] as? String, let url = URL(string: remote3D) else {
-            await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "No 3D link")
-            }
-            return
-        }
+        guard let remote3D = dict["imageLink3D"] as? String, let url = URL(string: remote3D) else { return }
 
-        // Download to temp file
-        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).appendingPathExtension(url.pathExtension)
+        // if already cached, nothing to do
+        if remoteModelLocalURLs[index] != nil { return }
+
+        if enablePanDebugPrints { print("PAL: starting download for \(remote3D)") }
+
+        // choose a temp file path with original extension
+        let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension
+        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("remote_\(index)_\(UUID().uuidString)").appendingPathExtension(ext)
+
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                await MainActor.run {
-                    self.showLoading(false, message: nil)
-                    self.infoView.set(title: "Model download failed: HTTP \(http.statusCode)")
-                }
+                if enablePanDebugPrints { print("PAL: download failed HTTP \(http.statusCode) for \(remote3D)") }
                 return
             }
             try data.write(to: tmpURL, options: .atomic)
+            // store cached URL
+            remoteModelLocalURLs[index] = tmpURL
+            if enablePanDebugPrints { print("PAL: downloaded model for index \(index) -> cached at \(tmpURL.path)") }
         } catch {
-            await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "Download error")
-                if self.enablePanDebugPrints { print("PAL: failed to download 3D -> \(error.localizedDescription)") }
-            }
-            return
+            if enablePanDebugPrints { print("PAL: failed to download model \(remote3D) -> \(error.localizedDescription)") }
         }
+    }
 
-        // Try to load the model using SceneKit's URL-based loader
+    // FINAL, SAFE, CRASH-FREE MODEL LOADER
+    private func placeRemoteModelFromLocal(index: Int, localURL: URL) async {
+
+        guard index >= 0 && index < remoteItems.count else { return }
+        let dict = remoteItems[index]
+
         do {
-            // Attempt to create a SCNScene directly from the file URL.
-            // This works for many supported formats. If SceneKit can't parse it, it'll throw and we'll show an error.
-            let scene = try SCNScene(url: tmpURL, options: nil)
+            var containerNode: SCNNode? = nil
 
-            // Create a container node and attach all children from scene.rootNode
-            let container = SCNNode()
-            for child in scene.rootNode.childNodes {
-                container.addChildNode(child)
+            // ------------------------------------------------------
+            // 1) Try to load via SceneKit (.usdz/.scn/usda)
+            // ------------------------------------------------------
+            if let scn = try? SCNScene(url: localURL, options: nil) {
+                let root = SCNNode()
+                for child in scn.rootNode.childNodes {
+                    root.addChildNode(child)
+                }
+                containerNode = root
+                if enablePanDebugPrints { print("PAL: loaded using SCNScene(url:)") }
             }
 
-            // Simple bounding and scale normalization - optional small auto-scale
-            let (minVec, maxVec) = container.boundingBox
-            let size = SCNVector3(
-                x: maxVec.x - minVec.x,
-                y: maxVec.y - minVec.y,
-                z: maxVec.z - minVec.z
-            )
+            // ------------------------------------------------------
+            // 2) Fallback: Load using ModelIO → SCNNode(mdlObject:)
+            // ------------------------------------------------------
+//            if containerNode == nil {
+//                let asset = MDLAsset(url: localURL)
+//                let root = SCNNode()
+//                var added = false
+//
+//                for i in 0..<asset.count {
+//                    if let mdlObj = asset.object(at: i) as? MDLObject {
+//                        let scnNode = SCNNode(mdlObject: mdlObj)   // ✔ VALID
+//                        root.addChildNode(scnNode)
+//                        added = true
+//                    }
+//                }
+//
+//                if added {
+//                    containerNode = root
+//                    if enablePanDebugPrints { print("PAL: loaded using MDLAsset + SCNNode(mdlObject:)") }
+//                }
+//            }
+
+            // ------------------------------------------------------
+            // 3) If still nil → model is invalid
+            // ------------------------------------------------------
+            guard let container = containerNode else {
+                await MainActor.run {
+                    self.infoView.set(title: "Model load failed")
+                    if enablePanDebugPrints { print("PAL: Failed to create container node") }
+                }
+                return
+            }
+
+            // ------------------------------------------------------
+            // Auto-scale using boundingBox
+            // ------------------------------------------------------
+            let (minB, maxB) = container.boundingBox
+            let size = SCNVector3(maxB.x - minB.x, maxB.y - minB.y, maxB.z - minB.z)
             let maxSide = max(size.x, max(size.y, size.z))
+
             if maxSide > 0 {
-                // target ~0.5m largest dimension (tweak as required)
-                let desired: Float = 0.5
+                let desired: Float = 0.5     // ~50 cm max dimension
                 let scale = desired / maxSide
                 container.scale = SCNVector3(scale, scale, scale)
+                if enablePanDebugPrints { print("PAL: auto-scaled by \(scale)") }
             }
 
-            // Place the model roughly 0.6m in front of the camera (screen center)
-            var placementPosition = SCNVector3(0, 0, -0.6)
+            // ------------------------------------------------------
+            // Position in front of camera (~0.6m)
+            // ------------------------------------------------------
+            var pos = SCNVector3(0, 0, -0.6)
             if let pov = sceneView.pointOfView {
-                // convert local forward point to world
-                let local = SCNVector3(0, 0, -0.6)
-                let worldPos = pov.convertPosition(local, to: sceneView.scene.rootNode)
-                placementPosition = worldPos
-                // align orientation with camera yaw
+                pos = pov.convertPosition(pos, to: sceneView.scene.rootNode)
                 container.eulerAngles.y = pov.eulerAngles.y
             }
-
-            container.position = placementPosition
-
-            // Add a unique name so selection / deletion logic can operate
+            container.position = pos
             container.name = "remoteModel_\(UUID().uuidString)"
 
-            // Add to scene on main thread
+            // ------------------------------------------------------
+            // Place into scene
+            // ------------------------------------------------------
             await MainActor.run {
                 self.sceneView.scene.rootNode.addChildNode(container)
-                // set selection to the newly placed node and update UI
                 self.selectedNode = container
                 self.highlight(node: container, highlight: true)
-                self.addPlacedItem(dict)
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: dict["itemName"] as? String ?? "Model placed")
-                if self.enablePanDebugPrints { print("PAL: placed remote model from \(remote3D)") }
 
-                // Optionally collapse palette after placing
-                self.setPaletteCollapsed(true, animated: true)
+                self.infoView.set(title: dict["itemName"] as? String ?? "Model placed")
+                if enablePanDebugPrints { print("PAL: placed model from local \(localURL)") }
+
+                // Add to cart (your existing logic)
+                self.addPlacedItem(dict, at: index)
             }
+
         } catch {
-            // If SceneKit couldn't load it, surface a clear error and log for debugging
             await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "Model load failed")
-                if self.enablePanDebugPrints { print("PAL: SCNScene(url:) failed -> \(error.localizedDescription). File: \(tmpURL.path)") }
+                self.infoView.set(title: "Model load error")
+                if enablePanDebugPrints { print("PAL: load error \(error.localizedDescription)") }
             }
         }
     }
+
+
+
 
     // Helper: very small mapping function — replace with your project's mapping
     private func virtualObjectType(forDisplayName name: String) -> VirtualObjectType? {
@@ -1993,85 +2261,87 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     }
     
     private func setupCartUI() {
-        // Build a small cart button with badge and a price label under it
-        let btn = UIButton(type: .system)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.accessibilityIdentifier = "cartButton"
-        if #available(iOS 13.0, *) {
-            let cfg = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
-            btn.setImage(UIImage(systemName: "cart.fill", withConfiguration: cfg), for: .normal)
-        } else {
-            btn.setTitle("Cart", for: .normal)
-        }
-        btn.tintColor = .white
-        btn.backgroundColor = UIColor(white: 0.0, alpha: 0.45)
-        btn.layer.cornerRadius = 8
-        btn.layer.masksToBounds = true
-        btn.addTarget(self, action: #selector(cartButtonTapped(_:)), for: .touchUpInside)
+        // Already created? then return
+        if cartContainerView != nil { return }
 
-        view.addSubview(btn)
-        self.cartButton = btn
+        // --- Container ---
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = UIColor(white: 0.0, alpha: 0.45)
+        container.layer.cornerRadius = 12
+        container.clipsToBounds = true
+        container.tag = 0xCA0001
+        view.addSubview(container)
 
-        // Badge
-        let badge = UILabel()
-        badge.translatesAutoresizingMaskIntoConstraints = false
-        badge.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
-        badge.textColor = .white
-        badge.backgroundColor = .systemRed
-        badge.textAlignment = .center
-        badge.layer.cornerRadius = 10
-        badge.clipsToBounds = true
-        badge.isHidden = true // hidden when 0
-        view.addSubview(badge)
-        self.cartBadgeLabel = badge
-
-        // Total price label
-        let totalLbl = UILabel()
-        totalLbl.translatesAutoresizingMaskIntoConstraints = false
-        totalLbl.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
-        totalLbl.textColor = .white
-        totalLbl.textAlignment = .center
-        totalLbl.numberOfLines = 1
-        totalLbl.text = "" // initially empty
-        view.addSubview(totalLbl)
-        self.cartTotalLabel = totalLbl
-
-        // Positioning:
-        // If palette button exists, place cart left to palette; otherwise top-right safe area
-        if let paletteBtn = self.paletteButton, paletteBtn.superview != nil {
-            NSLayoutConstraint.activate([
-                btn.trailingAnchor.constraint(equalTo: paletteBtn.leadingAnchor, constant: -12),
-                btn.topAnchor.constraint(equalTo: paletteBtn.topAnchor),
-                btn.widthAnchor.constraint(equalToConstant: 44),
-                btn.heightAnchor.constraint(equalToConstant: 44)
-            ])
-        } else {
-            NSLayoutConstraint.activate([
-                btn.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -defaultPadding * 1.5),
-                btn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: defaultPadding * 1.0),
-                btn.widthAnchor.constraint(equalToConstant: 44),
-                btn.heightAnchor.constraint(equalToConstant: 44)
-            ])
-        }
-
-        // Badge anchored top-right of button
         NSLayoutConstraint.activate([
-            badge.centerXAnchor.constraint(equalTo: btn.trailingAnchor, constant: -6),
-            badge.centerYAnchor.constraint(equalTo: btn.topAnchor, constant: 6),
-            badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
-            badge.heightAnchor.constraint(equalToConstant: 20)
+            container.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            container.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -18),
+            container.widthAnchor.constraint(equalToConstant: 150),
+            container.heightAnchor.constraint(equalToConstant: 50)
         ])
 
-        // Total label below the button (small)
+        // --- Cart Icon ---
+        let icon = UIImageView(image: UIImage(systemName: "cart.fill"))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.tintColor = .white
+        container.addSubview(icon)
+
         NSLayoutConstraint.activate([
-            totalLbl.topAnchor.constraint(equalTo: btn.bottomAnchor, constant: 6),
-            totalLbl.centerXAnchor.constraint(equalTo: btn.centerXAnchor),
-            totalLbl.widthAnchor.constraint(lessThanOrEqualToConstant: 160)
+            icon.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            icon.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 22),
+            icon.heightAnchor.constraint(equalToConstant: 22)
         ])
 
-        // Initial update
-        updateCartUI()
+        // --- Badge ---
+        let badgeLabel = UILabel()
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgeLabel.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        badgeLabel.textColor = .white
+        badgeLabel.backgroundColor = UIColor.systemRed
+        badgeLabel.textAlignment = .center
+        badgeLabel.layer.cornerRadius = 10
+        badgeLabel.clipsToBounds = true
+        badgeLabel.text = "0"
+        badgeLabel.isHidden = true
+        badgeLabel.tag = 0xCA0002
+        container.addSubview(badgeLabel)
+
+        NSLayoutConstraint.activate([
+            badgeLabel.topAnchor.constraint(equalTo: icon.topAnchor, constant: -8),
+            badgeLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: -6),
+            badgeLabel.widthAnchor.constraint(equalToConstant: 20),
+            badgeLabel.heightAnchor.constraint(equalToConstant: 20)
+        ])
+
+        // --- Price Label ---
+        let priceLabel = UILabel()
+        priceLabel.translatesAutoresizingMaskIntoConstraints = false
+        priceLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        priceLabel.textColor = .white
+        priceLabel.textAlignment = .right
+        priceLabel.text = "0 INR"
+        priceLabel.tag = 0xCA0003
+        container.addSubview(priceLabel)
+
+        NSLayoutConstraint.activate([
+            priceLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            priceLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+
+
+        // ------------------------------------------------------
+        //  🔥 THIS IS THE “CACHING” YOU DIDN’T UNDERSTAND
+        // ------------------------------------------------------
+        self.cartContainerView = container
+        self.cartBadgeLabel = badgeLabel
+        self.cartPriceLabel = priceLabel
+
+        // Bring cart above AR view
+        view.bringSubviewToFront(container)
     }
+
+
     
     @objc private func cartButtonTapped(_ sender: Any?) {
         // Present a simple list or summary — for now, just print debug and show infoView.
@@ -2085,43 +2355,114 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
 
+    /// Add placed item bookkeeping and refresh cart UI
+    private func addPlacedItem(_ dict: [String: Any], at index: Int) {
+        placedItems.append(dict)
+        if enablePanDebugPrints { print("PAL: addPlacedItem -> total placed = \(placedItems.count)") }
+        updateCartUI()
+    }
+
     private func updateCartUI() {
-        // Compute total price and unit (use first non-empty unit found)
-        var total: Double = 0
-        var unit: String? = nil
-        for item in placedItems {
-            if let p = item["price"] as? NSNumber {
-                total += p.doubleValue
-            } else if let p = item["price"] as? Double {
-                total += p
-            }
-            if unit == nil {
-                if let u = item["priceUnit"] as? String, !u.isEmpty {
-                    unit = u
-                }
-            }
-        }
+        let cartCount = placedItems.count
+        let totalPrice: Double = placedItems
+            .compactMap { $0["price"] as? NSNumber }
+            .map { $0.doubleValue }
+            .reduce(0.0, +)
+        let priceUnit = (placedItems.first?["priceUnit"] as? String) ?? "INR"
 
-        // Update badge
-        if placedItems.isEmpty {
-            cartBadgeLabel.isHidden = true
-        } else {
-            cartBadgeLabel.isHidden = false
-            cartBadgeLabel.text = "\(placedItems.count)"
-        }
-
-        // Update total label (rounded to 2 decimals if needed; prefer integer when no fraction)
-        if placedItems.isEmpty {
-            cartTotalLabel.text = ""
-        } else {
-            let rounded = (total.truncatingRemainder(dividingBy: 1) == 0) ? String(format: "%.0f", total) : String(format: "%.2f", total)
-            if let u = unit {
-                cartTotalLabel.text = "\(rounded) \(u)"
+        DispatchQueue.main.async {
+            // If we have stored references use them (preferred).
+            if let badge = self.cartBadgeLabel {
+                badge.text = "\(cartCount)"
+                badge.isHidden = cartCount == 0
+                badge.alpha = cartCount == 0 ? 0.0 : 1.0
+            } else if let badge = self.view.viewWithTag(0xCA0002) as? UILabel {
+                badge.text = "\(cartCount)"
+                badge.isHidden = cartCount == 0
+                badge.alpha = cartCount == 0 ? 0.0 : 1.0
+                self.cartBadgeLabel = badge // cache for next time
             } else {
-                cartTotalLabel.text = "\(rounded)"
+                if self.enablePanDebugPrints { print("PAL: updateCartUI -> badge label not found") }
             }
+
+            if let priceLbl = self.cartPriceLabel {
+                priceLbl.text = String(format: "%.2f %@", totalPrice, priceUnit)
+                priceLbl.alpha = 1.0
+            } else if let priceLbl = self.view.viewWithTag(0xCA0003) as? UILabel {
+                priceLbl.text = String(format: "%.2f %@", totalPrice, priceUnit)
+                priceLbl.alpha = 1.0
+                self.cartPriceLabel = priceLbl // cache
+            } else {
+                if self.enablePanDebugPrints { print("PAL: updateCartUI -> price label not found") }
+            }
+
+            // Ensure container exists & visible (bring to front so ARSCNView doesn't cover it)
+            if let container = self.cartContainerView {
+                container.isHidden = false
+                container.alpha = 1.0
+                self.view.bringSubviewToFront(container)
+            } else if let container = self.view.viewWithTag(0xCA0001) {
+                container.isHidden = false
+                container.alpha = 1.0
+                self.cartContainerView = container
+                self.view.bringSubviewToFront(container)
+            } else {
+                if self.enablePanDebugPrints { print("PAL: updateCartUI -> cart container not found") }
+            }
+
+            if self.enablePanDebugPrints { print("PAL: updateCartUI -> count=\(cartCount) total=\(totalPrice) \(priceUnit)") }
         }
     }
+
+    
+    // Create and attach a floating price UILabel for a placed node.
+    private func attachPriceLabel(for node: SCNNode, priceStr: String) {
+        // Create label
+        let lbl = UILabel()
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        lbl.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        lbl.textColor = .white
+        lbl.backgroundColor = UIColor(white: 0.0, alpha: 0.6)
+        lbl.layer.cornerRadius = 6
+        lbl.clipsToBounds = true
+        lbl.textAlignment = .center
+        lbl.numberOfLines = 1
+        lbl.text = priceStr
+        lbl.sizeToFit()
+        // Add some padding by embedding in container view or use insets via extra width
+        let padding: CGFloat = 12
+        lbl.frame = CGRect(origin: .zero, size: CGSize(width: lbl.intrinsicContentSize.width + padding, height: 26))
+
+        // Add to view (on top of ARSCNView)
+        view.addSubview(lbl)
+
+        // store mapping
+        priceLabelMap[ObjectIdentifier(node)] = lbl
+
+        // Initially hidden until renderer positions it
+        lbl.isHidden = true
+    }
+
+    // Remove associated label when node removed
+    private func removePriceLabel(for node: SCNNode) {
+        let id = ObjectIdentifier(node)
+        if let lbl = priceLabelMap[id] {
+            lbl.removeFromSuperview()
+            priceLabelMap.removeValue(forKey: id)
+        }
+    }
+
+    // Convenience to build price string from your item dict
+    private func priceString(from dict: [String: Any]) -> String {
+        if let p = dict["price"] as? NSNumber {
+            let unit = (dict["priceUnit"] as? String) ?? ""
+            // show no decimals when not needed
+            let formatted = (p.doubleValue.truncatingRemainder(dividingBy: 1) == 0) ? String(format: "%.0f", p.doubleValue) : String(format: "%.2f", p.doubleValue)
+            return "\(formatted) \(unit)"
+        }
+        return "-"
+    }
+
 
     private func addPlacedItem(_ item: [String: Any]) {
         placedItems.append(item)
@@ -2135,8 +2476,238 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         updateCartUI()
         if enablePanDebugPrints { print("CART: removed item -> now \(placedItems.count) items") }
     }
+    
+    private func formatPriceLabelText(from dict: [String: Any]) -> String {
+        if let p = dict["price"] as? NSNumber, let unit = dict["priceUnit"] as? String {
+            return String(format: "%.0f %@", p.doubleValue, unit)
+        }
+        return "-"
+    }
+    
+    /// Creates a small billboard node with text and a subtle background so the label is readable over AR content.
+    private func makeBillboardTextNode(text: String, fontSize: CGFloat = 10) -> SCNNode {
+        // SCNText geometry
+        let scnText = SCNText(string: text, extrusionDepth: 0.0)
+        scnText.font = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
+        scnText.alignmentMode = CATextLayerAlignmentMode.center.rawValue
+        scnText.firstMaterial?.diffuse.contents = UIColor.white
+        scnText.firstMaterial?.isDoubleSided = true
+        scnText.flatness = 0.1
 
+        // text node
+        let textNode = SCNNode(geometry: scnText)
 
+        // center pivot horizontally
+        let (tMin, tMax) = scnText.boundingBox
+        let textWidth = CGFloat(tMax.x - tMin.x)
+        let textHeight = CGFloat(tMax.y - tMin.y)
+        textNode.pivot = SCNMatrix4MakeTranslation((tMin.x + tMax.x) / 2.0, tMin.y, 0)
+
+        // scale text so it shows reasonably in AR (small)
+        // tweak the scale factor if text is too large/small for certain models
+        let scaleFactor = Float(max(0.0006, 0.0012 / Float(max(1.0, textWidth))))
+        textNode.scale = SCNVector3(scaleFactor, scaleFactor, scaleFactor)
+
+        // background plane (for contrast)
+        let bgWidth = max(CGFloat(textWidth) * CGFloat(scaleFactor) * 1.2, 0.035)
+        let bgHeight = max(CGFloat(textHeight) * CGFloat(scaleFactor) * 1.4, 0.02)
+        let bgPlane = SCNPlane(width: bgWidth, height: bgHeight)
+        bgPlane.cornerRadius = bgHeight * 0.25
+        bgPlane.firstMaterial?.diffuse.contents = UIColor(white: 0.0, alpha: 0.55)
+        bgPlane.firstMaterial?.isDoubleSided = true
+        let bgNode = SCNNode(geometry: bgPlane)
+        // position behind text slightly
+        bgNode.position = SCNVector3(0, Float(bgHeight/2.0) - 0.002, -0.001)
+
+        let wrapper = SCNNode()
+        wrapper.addChildNode(bgNode)
+        wrapper.addChildNode(textNode)
+
+        // billboard constraint so it faces camera on Y axis
+        let billboard = SCNBillboardConstraint()
+        billboard.freeAxes = .Y
+        wrapper.constraints = [billboard]
+
+        return wrapper
+    }
+    
+    private func makeBillboardLabelNode(title: String, price: Double?, unit: String?, modelMaxSide: Float) -> SCNNode {
+        // Pixel layout
+        let padding: CGFloat = 8
+        // Set base pixel width relative to model size; clamp to reasonable pixel widths
+        let baseWidthPx = max(180, CGFloat(min(420, CGFloat(modelMaxSide) * 1000.0 * 0.9))) // convert meters->px heuristic
+        let titleFont = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        let priceFont = UIFont.systemFont(ofSize: 13, weight: .medium)
+        let textColor = UIColor.white
+        let bgColor = UIColor(white: 0.04, alpha: 0.9)
+
+        // Measure title (multi-line)
+        let maxTextWidth = baseWidthPx - padding * 2
+        let titleAttrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: textColor]
+        let titleRect = (title as NSString).boundingRect(with: CGSize(width: maxTextWidth, height: 999),
+                                                         options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                                         attributes: titleAttrs, context: nil)
+        var priceHeight: CGFloat = 0
+        var priceText = ""
+        if let p = price {
+            priceText = String(format: "%.0f %@", p, unit ?? "")
+            priceHeight = priceText.isEmpty ? 0 : (priceFont.lineHeight + 4)
+        }
+
+        let totalHeight = padding * 2 + ceil(titleRect.height) + priceHeight
+        let rendererSize = CGSize(width: baseWidthPx, height: totalHeight)
+
+        UIGraphicsBeginImageContextWithOptions(rendererSize, false, 0.0)
+        guard let _ = UIGraphicsGetCurrentContext() else {
+            UIGraphicsEndImageContext()
+            return SCNNode()
+        }
+
+        // draw background
+        let bgPath = UIBezierPath(roundedRect: CGRect(origin: .zero, size: rendererSize), cornerRadius: 8)
+        bgColor.setFill()
+        bgPath.fill()
+
+        // draw title
+        let titleOrigin = CGPoint(x: padding, y: padding)
+        (title as NSString).draw(in: CGRect(origin: titleOrigin, size: CGSize(width: maxTextWidth, height: ceil(titleRect.height))), withAttributes: titleAttrs)
+
+        // draw price (right aligned)
+        if !priceText.isEmpty {
+            let priceAttrs: [NSAttributedString.Key: Any] = [.font: priceFont, .foregroundColor: textColor]
+            let priceSize = (priceText as NSString).size(withAttributes: priceAttrs)
+            let priceOrigin = CGPoint(x: rendererSize.width - padding - priceSize.width, y: padding + ceil(titleRect.height))
+            (priceText as NSString).draw(at: priceOrigin, withAttributes: priceAttrs)
+        }
+
+        let rendered = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+
+        // Create plane sized in meters relative to modelMaxSide (so it scales with model)
+        // planeWidthMeters: make it ~30% of model's max side but clamp to small range
+        let planeWidthMeters = max(0.06, Double(modelMaxSide) * 0.35)
+        let aspect = rendererSize.height / rendererSize.width
+        let planeHeightMeters = planeWidthMeters * Double(aspect)
+
+        let plane = SCNPlane(width: CGFloat(planeWidthMeters), height: CGFloat(planeHeightMeters))
+        plane.cornerRadius = CGFloat(max(0.002, CGFloat(planeWidthMeters) * 0.02))
+
+        let mat = SCNMaterial()
+        mat.isDoubleSided = true
+        mat.lightingModel = .constant
+        mat.diffuse.contents = rendered ?? UIColor(white: 0.0, alpha: 0.85)
+        plane.firstMaterial = mat
+
+        let node = SCNNode(geometry: plane)
+        node.name = "priceLabel_\(UUID().uuidString)"
+
+        // billboard so it always faces camera (rotate only around Y)
+        let billboard = SCNBillboardConstraint()
+        billboard.freeAxes = .Y
+        node.constraints = [billboard]
+
+        return node
+    }
+
+    private func attachPriceLabel(to container: SCNNode, using dict: [String: Any]) {
+        // Avoid duplicates
+        if container.childNode(withName: "priceLabel", recursively: false) != nil {
+            return
+        }
+
+        let itemName = dict["itemName"] as? String ?? ""
+        let price = (dict["price"] as? NSNumber)?.doubleValue
+        let priceUnit = dict["priceUnit"] as? String
+
+        // compute union bounding box (in container local space)
+        let (minV, maxV) = recursiveBoundingBox(for: container)
+        let sizeX = maxV.x - minV.x
+        let sizeY = maxV.y - minV.y
+        let sizeZ = maxV.z - minV.z
+        let maxSide = max(sizeX, max(sizeY, sizeZ))
+
+        // guard: if maxSide is 0 or extremely small, fallback to 0.2m
+        let normalizedMaxSide = (maxSide > 0.001) ? maxSide : 0.2
+
+        // Build label node sized relative to model
+        let labelNode = makeBillboardLabelNode(title: itemName, price: price, unit: priceUnit, modelMaxSide: normalizedMaxSide)
+        // Give deterministic name for find/remove
+        labelNode.name = "priceLabel"
+
+        // Place it at container-local top center; small offset above top
+        // topY is maxV.y (already in container local coords). Clamp offsets to sane ranges (meters).
+        let topY = maxV.y
+        let offsetAboveTop: Float = max(0.02, normalizedMaxSide * 0.06) // 2cm or 6% of model height
+
+        // place near top-center
+        let centerX = (minV.x + maxV.x) / 2.0
+        let centerZ = (minV.z + maxV.z) / 2.0
+        labelNode.position = SCNVector3(centerX, topY + offsetAboveTop, centerZ)
+
+        // attach as child so it moves with the model
+        container.addChildNode(labelNode)
+
+        if enablePanDebugPrints { print("PAL: attached price label for '\(itemName)' at y=\(labelNode.position.y) (modelMaxSide=\(normalizedMaxSide))") }
+    }
+
+    // Call this after you successfully placed `container` (the placed remote model)
+    private func placeModelAndAttachLabel(container: SCNNode, dict: [String: Any]) {
+        // add container, select & highlight as earlier
+        sceneView.scene.rootNode.addChildNode(container)
+        selectedNode = container
+        highlight(node: container, highlight: true)
+
+        // attach price/name label
+        attachPriceLabel(to: container, using: dict)
+
+        // Update UI
+        DispatchQueue.main.async {
+            self.showLoading(false, message: nil)
+            self.infoView.set(title: dict["itemName"] as? String ?? "Model placed")
+            if self.enablePanDebugPrints { print("PAL: placed remote model from \(dict["imageLink3D"] as? String ?? "<url>")") }
+            self.setPaletteCollapsed(true, animated: true)
+        }
+    }
+    
+    /// Recursively computes bounding box in the coordinate space of `root`.
+    /// Returns (minVec, maxVec) in `root`'s local coordinate space.
+    private func recursiveBoundingBox(for root: SCNNode) -> (SCNVector3, SCNVector3) {
+        var minVec = SCNVector3(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
+        var maxVec = SCNVector3(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
+
+        // DFS closure
+        func visit(_ node: SCNNode) {
+            // node's local bounding box (may be zero if not geometry)
+            var bmin = SCNVector3Zero
+            var bmax = SCNVector3Zero
+            if node.__getBoundingBoxMin(&bmin, max: &bmax) { // use private-ish API - safe in practice; fallback handled below
+                // convert min/max from node local to root local coordinates
+                let worldMin = node.convertPosition(bmin, to: root)
+                let worldMax = node.convertPosition(bmax, to: root)
+
+                minVec.x = min(minVec.x, worldMin.x)
+                minVec.y = min(minVec.y, worldMin.y)
+                minVec.z = min(minVec.z, worldMin.z)
+
+                maxVec.x = max(maxVec.x, worldMax.x)
+                maxVec.y = max(maxVec.y, worldMax.y)
+                maxVec.z = max(maxVec.z, worldMax.z)
+            }
+
+            // Recurse children
+            for child in node.childNodes {
+                visit(child)
+            }
+        }
+
+        visit(root)
+
+        // If nothing found (min still huge), return small zero box
+        if minVec.x > maxVec.x {
+            return (SCNVector3Zero, SCNVector3Zero)
+        }
+        return (minVec, maxVec)
+    }
 
     // VirtualObjectViewController.swift
     // central place to read Mac IP (change default as needed or make this read from user settings)
@@ -2157,8 +2728,104 @@ extension VirtualObjectViewController: ARSCNViewDelegate {
             else { return }
 
             self.horizontalPlaneDetectedSubject.send(!self.sceneView.session.raycast(query).isEmpty)
+            let cameraPos = self.sceneView.pointOfView?.simdWorldPosition
+            self.sceneView.scene.rootNode.enumerateChildNodes { node, _ in
+                guard let name = node.name, name.hasPrefix("remoteModel_") || node.name?.hasPrefix("container_") == true else { return }
+                // find label child
+                if let label = node.childNode(withName: "priceLabel", recursively: false) {
+                    if let cam = cameraPos {
+                        let d = simd_length(node.simdWorldPosition - cam)
+                        // scale rule: clamp so label not too small or too big
+                        let s = max(0.6, min(1.5, Float(1.0 / (0.5 + d * 0.6))))
+                        label.scale = SCNVector3(s, s, s)
+                    }
+                }
+            }
+
+            // Update price label positions
+            for (id, label) in self.priceLabelMap {
+                // find the node by ObjectIdentifier -> iterate scene nodes to match id
+                // (we can store node references directly too; here we try to find by comparing identifiers with child nodes)
+                // Better approach: store [ObjectIdentifier: SCNNode] or directly store node keys. For brevity, try to find node in scene graph.
+                var foundNode: SCNNode? = nil
+                // quick search among root children - assume top-level container nodes are direct children
+                for child in self.sceneView.scene.rootNode.childNodes {
+                    if ObjectIdentifier(child) == id {
+                        foundNode = child; break
+                    }
+                }
+                // fallback: try a deeper search if not found (optional)
+                if foundNode == nil {
+                    // you may implement a recursive search if your placed containers are nested
+                    func search(_ node: SCNNode) -> SCNNode? {
+                        for c in node.childNodes {
+                            if ObjectIdentifier(c) == id { return c }
+                            if let r = search(c) { return r }
+                        }
+                        return nil
+                    }
+                    foundNode = search(self.sceneView.scene.rootNode)
+                }
+
+                guard let node = foundNode else {
+                    // node removed; remove label
+                    label.removeFromSuperview()
+                    self.priceLabelMap.removeValue(forKey: id)
+                    continue
+                }
+
+                // Project world pos to screen
+                let worldPos = node.worldPosition
+                let projected = self.sceneView.projectPoint(worldPos)
+                // projected.z is depth. If behind camera, hide.
+                if projected.z.isFinite && projected.z > 0 {
+                    // Convert SceneKit's coordinate (origin top-left?) to UIKit coords:
+                    // SceneKit returns x,y in view coordinates already relative to top-left of view
+                    let screenPoint = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
+
+                    // Optional: adjust vertical offset so label sits *above* model (use boundingBox height)
+                    let (_, max) = node.boundingBox
+                    let modelHeight = max.y - node.boundingBox.min.y
+                    // project a point slightly above the model using local offset
+                    // compute a point slightly upward in world coordinates
+                    let aboveWorld = SCNVector3(worldPos.x, worldPos.y + modelHeight * 0.6, worldPos.z)
+                    let projectedAbove = self.sceneView.projectPoint(aboveWorld)
+                    let screenPointAbove = CGPoint(x: CGFloat(projectedAbove.x), y: CGFloat(projectedAbove.y))
+
+                    // Update label position & visibility
+                    label.isHidden = false
+                    // animate small lerp for smooth movement
+                    UIView.animate(withDuration: 0.05) {
+                        label.center = screenPointAbove
+                    }
+
+                    // Optional: scale label with distance
+                    if let pov = self.sceneView.pointOfView {
+                        let camPos = pov.worldPosition
+                        let dx = camPos.x - worldPos.x
+                        let dy = camPos.y - worldPos.y
+                        let dz = camPos.z - worldPos.z
+                        let dist = sqrt(dx*dx + dy*dy + dz*dz)
+                        // clamp scale
+                        let scale = CGFloat(
+                            Swift.max(
+                                0.7,
+                                Swift.min(
+                                    1.2,
+                                    1.0 / (0.75 + Double(dist) * 0.6)
+                                )
+                            )
+                        )
+
+                        label.transform = CGAffineTransform(scaleX: scale, y: scale)
+                    }
+                } else {
+                    label.isHidden = true
+                }
+            }
         }
     }
+
 
 }
 
