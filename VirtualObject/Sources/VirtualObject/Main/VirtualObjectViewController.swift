@@ -28,6 +28,8 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     private var cartContainerView: UIView?
     private var cartTotalLabel: UILabel!
     private var placedItems: [[String: Any]] = []
+    // Add near your other private state properties
+    private var placedNodeUUIDMapping: [String: String] = [:]
 
     // Search/upload UI
     private var searchContainer: UIView?
@@ -921,6 +923,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                     print("PAN: delete badge tapped — removing model node named \(toRemove.name ?? "<unknown>")")
                     // request presenter to remove and cleanup
                     presenter.removeVirtualObject(node: toRemove)
+                    self.removePlacedItem(for: toRemove)
                     self.removePriceLabel(for: toRemove)
                 } else {
                     print("PAN: delete badge tapped but parent model not found")
@@ -1001,6 +1004,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             dbg("user confirmed remove of node \(nodeToRemove.name ?? "<unnamed>")")
 
             // Ask presenter to do any cleanup / bookkeeping
+            self.removePlacedItem(for: nodeToRemove)
             self.presenter.removeVirtualObject(node: nodeToRemove)
             self.removePriceLabel(for: nodeToRemove)
 
@@ -1721,163 +1725,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
 
-    /// The corrected placeRemoteModel implementation (async)
-    private func placeRemoteModel(at index: Int) async {
-        guard index >= 0 && index < remoteItems.count else {
-            await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "Invalid item")
-            }
-            return
-        }
-
-        if isPlacingRemoteIndex.contains(index) {
-            if enablePanDebugPrints {
-                print("PAL: already placing remote index \(index), ignoring duplicate tap")
-            }
-            return
-        }
-        isPlacingRemoteIndex.insert(index)
-
-        let dict = remoteItems[index]
-        guard let remote3D = dict["imageLink3D"] as? String,
-              let url = URL(string: remote3D) else {
-            await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "No 3D link")
-            }
-            isPlacingRemoteIndex.remove(index)
-            return
-        }
-
-        if enablePanDebugPrints {
-            print("PAL: starting download for \(url.absoluteString)")
-        }
-
-        // download to temp file
-        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension(url.pathExtension)
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                await MainActor.run {
-                    self.showLoading(false, message: nil)
-                    self.infoView.set(title: "Model download failed: HTTP \(http.statusCode)")
-                }
-                isPlacingRemoteIndex.remove(index)
-                return
-            }
-            try data.write(to: tmpURL, options: .atomic)
-        } catch {
-            await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "Download error")
-                if self.enablePanDebugPrints {
-                    print("PAL: failed to download 3D -> \(error.localizedDescription)")
-                }
-            }
-            isPlacingRemoteIndex.remove(index)
-            return
-        }
-
-        // load scene from the temp file (works for .usdz/.scn/.dae/.glb)
-        do {
-            let sceneFromURL = try SCNScene(url: tmpURL, options: nil)
-
-            // container node (single handle)
-            let container = SCNNode()
-            for child in sceneFromURL.rootNode.childNodes {
-                container.addChildNode(child)
-            }
-
-            // compute bounding box (in container space)
-            let (minB, maxB) = recursiveBoundingBox(for: container)
-            let size = SCNVector3(x: maxB.x - minB.x,
-                                  y: maxB.y - minB.y,
-                                  z: maxB.z - minB.z)
-            let maxSide = max(size.x, max(size.y, size.z))
-
-            // normalize scale to a reasonable size (target ~0.5m for largest dimension)
-            if maxSide > 0.0001 {
-                let desired: Float = 0.5
-                let scale = desired / maxSide
-                container.scale = SCNVector3(scale, scale, scale)
-                if enablePanDebugPrints {
-                    print("PAL: model auto-scaled by \(scale) (maxSide=\(maxSide))")
-                }
-            }
-
-            // placement ~0.6m in front of camera
-            var placementPosition = SCNVector3(0, 0, -0.6)
-            if let pov = sceneView.pointOfView {
-                let worldPos = pov.convertPosition(placementPosition, to: sceneView.scene.rootNode)
-                placementPosition = worldPos
-                container.eulerAngles.y = pov.eulerAngles.y
-            }
-            container.position = placementPosition
-
-            // bookkeeping
-            container.name = "remoteModel_\(UUID().uuidString)"
-            let ud = NSMutableDictionary()
-            ud["remoteIndex"] = index
-            container.setValue(index, forKey: "remoteIndex")
-
-            // add to scene + attach labels on main actor
-            await MainActor.run {
-                self.sceneView.scene.rootNode.addChildNode(container)
-                self.selectedNode = container
-                self.highlight(node: container, highlight: true)
-
-                // attach price label slightly above model top
-                let priceText = self.formatPriceLabelText(from: dict)
-                let priceNode = self.makeBillboardTextNode(text: priceText)
-                let (cMin, cMax) = self.recursiveBoundingBox(for: container)
-                let modelMaxSide = max(cMax.x - cMin.x, max(cMax.y - cMin.y, cMax.z - cMin.z))
-                let offsetY = cMax.y + max(0.02, modelMaxSide * 0.02)
-                priceNode.position = SCNVector3(0, offsetY, 0)
-                container.addChildNode(priceNode)
-
-                if self.enablePanDebugPrints {
-                    print("PAL: attached price label for '\(dict["itemName"] as? String ?? "")' at y=\(offsetY) (modelMaxSide=\(modelMaxSide))")
-                }
-
-                // attach name label under price (per your request)
-                if let itemName = dict["itemName"] as? String {
-                    let nameNode = self.makeBillboardTextNode(text: itemName)
-                    nameNode.position = SCNVector3(0, offsetY - 0.035, 0)
-                    container.addChildNode(nameNode)
-                }
-
-                // bookkeeping + cart update
-                self.addPlacedItem(dict, at: index)
-
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: dict["itemName"] as? String ?? "Model placed")
-                if self.enablePanDebugPrints {
-                    print("PAL: placed remote model from \(remote3D)")
-                }
-
-                self.setPaletteCollapsed(true, animated: true)
-            }
-        } catch {
-            await MainActor.run {
-                self.showLoading(false, message: nil)
-                self.infoView.set(title: "Model load failed")
-                if self.enablePanDebugPrints {
-                    print("PAL: failed to load model -> \(error.localizedDescription)")
-                }
-            }
-            isPlacingRemoteIndex.remove(index)
-            return
-        }
-
-        // done
-        isPlacingRemoteIndex.remove(index)
-    }
-
-
     @objc private func paletteItemTapped(_ gesture: UITapGestureRecognizer) {
         guard let card = gesture.view as? VirtualObjectCardView else {
             if enablePanDebugPrints { print("PAL: paletteItemTapped - tap not on card") }
@@ -2036,28 +1883,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             }
 
             // ------------------------------------------------------
-            // 2) Fallback: Load using ModelIO → SCNNode(mdlObject:)
-            // ------------------------------------------------------
-//            if containerNode == nil {
-//                let asset = MDLAsset(url: localURL)
-//                let root = SCNNode()
-//                var added = false
-//
-//                for i in 0..<asset.count {
-//                    if let mdlObj = asset.object(at: i) as? MDLObject {
-//                        let scnNode = SCNNode(mdlObject: mdlObj)   // ✔ VALID
-//                        root.addChildNode(scnNode)
-//                        added = true
-//                    }
-//                }
-//
-//                if added {
-//                    containerNode = root
-//                    if enablePanDebugPrints { print("PAL: loaded using MDLAsset + SCNNode(mdlObject:)") }
-//                }
-//            }
-
-            // ------------------------------------------------------
             // 3) If still nil → model is invalid
             // ------------------------------------------------------
             guard let container = containerNode else {
@@ -2105,7 +1930,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 if enablePanDebugPrints { print("PAL: placed model from local \(localURL)") }
 
                 // Add to cart (your existing logic)
-                self.addPlacedItem(dict, at: index)
+                self.addPlacedItem(dict, at: index, node: containerNode!)
             }
 
         } catch {
@@ -2361,6 +2186,26 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         if enablePanDebugPrints { print("PAL: addPlacedItem -> total placed = \(placedItems.count)") }
         updateCartUI()
     }
+    
+    private func addPlacedItem(_ dict: [String: Any], at index: Int, node: SCNNode) {
+        // Create a stable uuid and attach to both node.name and the dict copy
+        let uuid = UUID().uuidString
+        // name the node so later removal can find it
+        node.name = "placed_\(uuid)"
+
+        // store mapping from node.name -> uuid (keeps mapping simple)
+        placedNodeUUIDMapping[node.name ?? uuid] = uuid
+
+        // create a copy of dict with uuid marker so updateCartUI() still works unchanged
+        var copy = dict
+        copy["__placedNodeUUID"] = uuid
+
+        // call your existing addPlacedItem (which appends to placedItems and updates UI)
+        // If you only have the simple version `addPlacedItem(_ dict: [String: Any], at index: Int)`,
+        // we keep that behaviour but pass the augmented dict.
+        self.addPlacedItem(copy, at: index)
+    }
+
 
     private func updateCartUI() {
         let cartCount = placedItems.count
@@ -2470,12 +2315,41 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         if enablePanDebugPrints { print("CART: added item -> now \(placedItems.count) items, total=\(cartTotalLabel.text ?? "")") }
     }
 
-    private func removePlacedItem(at index: Int) {
-        guard index >= 0 && index < placedItems.count else { return }
-        placedItems.remove(at: index)
-        updateCartUI()
-        if enablePanDebugPrints { print("CART: removed item -> now \(placedItems.count) items") }
+    private func removePlacedItem(for node: SCNNode) {
+        // run on main thread for UI updates and array mutation
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            // try direct node.name match first
+            if let nodeName = node.name {
+                // If nodeName is like "placed_<uuid>"
+                if let uuid = self.placedNodeUUIDMapping[nodeName] {
+                    // find index in placedItems with matching uuid
+                    if let idx = self.placedItems.firstIndex(where: { ($0["__placedNodeUUID"] as? String) == uuid }) {
+                        self.placedItems.remove(at: idx)
+                        // remove mapping entry
+                        self.placedNodeUUIDMapping.removeValue(forKey: nodeName)
+                        if self.enablePanDebugPrints { print("PAL: removePlacedItem -> removed item with uuid=\(uuid) at index=\(idx)") }
+                        self.updateCartUI()
+                        return
+                    }
+                }
+                // fallback: try match nodeName directly in dict (in case you put full nodeName in dict earlier)
+                if let idx2 = self.placedItems.firstIndex(where: { ($0["__placedNodeUUID"] as? String) == nodeName || ($0["__nodeName"] as? String) == nodeName }) {
+                    self.placedItems.remove(at: idx2)
+                    self.placedNodeUUIDMapping.removeValue(forKey: nodeName)
+                    if self.enablePanDebugPrints { print("PAL: removePlacedItem -> removed item matching nodeName=\(nodeName) at index=\(idx2)") }
+                    self.updateCartUI()
+                    return
+                }
+            }
+
+            // Last resort: try to match by some unique field in your dict (like imageLink3D) using pointer or node's stored info.
+            // If you previously stored some identifier in node's name or in-memory mapping use that here.
+            // If nothing matched, just log
+            if self.enablePanDebugPrints { print("PAL: removePlacedItem -> no placed item matched node \(node.name ?? "<unnamed>")") }
+        }
     }
+
     
     private func formatPriceLabelText(from dict: [String: Any]) -> String {
         if let p = dict["price"] as? NSNumber, let unit = dict["priceUnit"] as? String {

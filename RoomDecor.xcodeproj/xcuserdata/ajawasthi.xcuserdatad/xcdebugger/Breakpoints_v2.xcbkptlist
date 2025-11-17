@@ -14,10 +14,10 @@
             filePath = "VirtualObject/Sources/VirtualObject/Main/VirtualObjectViewController.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "1986"
-            endingLineNumber = "1986"
-            landmarkName = "downloadRemoteModelAndStage(index:)"
-            landmarkType = "7">
+            startingLineNumber = "1833"
+            endingLineNumber = "1833"
+            landmarkName = "VirtualObjectViewController"
+            landmarkType = "3">
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>
