@@ -3,6 +3,7 @@ import Resolver
 import Author
 import CoreUi
 import RoomScan
+import SwiftUI
 import VirtualObject
 
 class AppRouter:
@@ -14,23 +15,45 @@ class AppRouter:
 
     private let navigationController = UINavigationController()
     private let container: Resolver
+    private lazy var coordinator = Coordinator()
 
+//    private lazy var initialViewController: UIViewController = {
+//        let supportsLidar: Bool = UserDefaults.standard.bool(forKey: "supportLidar")
+//
+//        if supportsLidar {
+//            let initialViewController: RoomScanLandingViewController = container.resolve(args: false)
+//            return initialViewController
+//        } else {
+//            let initialViewController: VirtualObjectLandingViewController = container.resolve()
+//            return initialViewController
+//        }
+//    }()
+    
     private lazy var initialViewController: UIViewController = {
-        let supportsLidar: Bool = UserDefaults.standard.bool(forKey: "supportLidar")
+        // Create the WelcomeView — provide actions that call AppRouter functions
+        let welcomeView = WelcomeView(
+            openVirtualAction: { [weak self] in
+                self?.showVirtualObjectViewController(for: .armchair) // adjust if you need a default type
+            },
+            openRoomScanAction: { [weak self] in
+                self?.showRoomScanViewController()
+            }
+        )
+        // inject coordinator as environment object so WelcomeView can call presentCart, openRoomScan, etc.
+        let root = welcomeView.environmentObject(coordinator)
 
-        if supportsLidar {
-            let initialViewController: RoomScanLandingViewController = container.resolve(args: false)
-            return initialViewController
-        } else {
-            let initialViewController: VirtualObjectLandingViewController = container.resolve()
-            return initialViewController
-        }
+        let host = UIHostingController(rootView: root)
+        host.modalPresentationStyle = .fullScreen
+        return host
     }()
 
-    init(container: Resolver) {
+
+    public init(container: Resolver) {
         self.container = container
 
         super.init()
+        // wire coordinator back to this router so SwiftUI can call router actions
+        coordinator.setAppRouter(self)
 
         configureNavigationBar()
     }
@@ -39,7 +62,7 @@ class AppRouter:
         navigationController.viewControllers.last
     }
 
-    func setStartScreen(in window: UIWindow?) {
+    public func setStartScreen(in window: UIWindow?) {
         navigationController.setViewControllers([initialViewController], animated: false)
 
         window?.rootViewController = navigationController
@@ -49,13 +72,27 @@ class AppRouter:
             showError(for: .missingLidar)
         }
     }
+    
+    func presentCart(with items: [CartModel], animated: Bool = true) {
+        // Create the SwiftUI CartView (assumes CartView has initializer `init(items: [CartItem])`)
+        let cartSwiftUIView = CartView()
+
+        // Wrap it in a hosting controller and a nav controller for a close/back bar
+        let host = UIHostingController(rootView: cartSwiftUIView)
+        let nav = UINavigationController(rootViewController: host)
+        nav.modalPresentationStyle = .automatic
+
+        // Present from the current visible VC
+        currentViewController?.present(nav, animated: animated, completion: nil)
+    }
+
 
     func showVirtualObjectLandingViewController() {
         let virtualObjectLandingViewController: VirtualObjectLandingViewController = container.resolve()
         replaceLastViewController(with: virtualObjectLandingViewController)
     }
 
-    func showVirtualObjectViewController(for type: VirtualObjectType) {
+    public func showVirtualObjectViewController(for type: VirtualObjectType) {
         let virtualObjectViewController: VirtualObjectViewController = container.resolve(args: type)
         navigationController.pushViewController(virtualObjectViewController, animated: true)
     }
@@ -65,12 +102,12 @@ class AppRouter:
         replaceLastViewController(with: roomScanLandingViewController)
     }
 
-    func showRoomScanViewController() {
+    public func showRoomScanViewController() {
         let roomScanViewController: RoomScanViewController = container.resolve()
         navigationController.pushViewController(roomScanViewController, animated: true)
     }
 
-    func presentSwitchModuleSheet() {
+    public func presentSwitchModuleSheet() {
         let switchModuleViewController: SwitchModuleViewController = container.resolve()
         let modalViewController = ModalViewController(childViewController: switchModuleViewController)
 
@@ -81,12 +118,12 @@ class AppRouter:
         navigationController.present(modalViewController, animated: true)
     }
 
-    func authorViewTap() {
+    public func authorViewTap() {
         let authorViewController: AuthorViewController = container.resolve()
         navigationController.pushViewController(authorViewController, animated: true)
     }
 
-    func switchModule() {
+    public func switchModule() {
         if navigationController.viewControllers.last is RoomScanLandingViewController {
             showVirtualObjectLandingViewController()
         } else if navigationController.viewControllers.last is VirtualObjectLandingViewController {
@@ -94,13 +131,13 @@ class AppRouter:
         }
     }
 
-    func presentShareSheet(for items: [URL]) {
+    public func presentShareSheet(for items: [URL]) {
         let activityViewController = UIActivityViewController(activityItems: items, applicationActivities: nil)
         activityViewController.popoverPresentationController?.sourceView = currentViewController?.view
         currentViewController?.present(activityViewController, animated: true, completion: nil)
     }
 
-    func showWebView(url: URL?) {
+    public func showWebView(url: URL?) {
         guard let url else { return }
 
         UIApplication.shared.open(url)
@@ -113,12 +150,12 @@ class AppRouter:
         UINavigationBar.appearance().backItem?.title = ""
     }
 
-    func showErrorPopup(for type: RoomScanErrorType) {
+    public func showErrorPopup(for type: RoomScanErrorType) {
         let errorType = ErrorType(from: type)
         showError(for: errorType)
     }
 
-    func showErrorPopup(for type: VirtualObjectErrorType) {
+    public func showErrorPopup(for type: VirtualObjectErrorType) {
         let errorType = ErrorType(from: type)
         showError(for: errorType)
     }
@@ -171,7 +208,7 @@ extension AppRouter {
 // MARK: - Custom navigation transition
 extension AppRouter: UINavigationControllerDelegate {
 
-    func navigationController(
+    public func navigationController(
         _ navigationController: UINavigationController,
         animationControllerFor operation: UINavigationController.Operation,
         from fromVC: UIViewController,

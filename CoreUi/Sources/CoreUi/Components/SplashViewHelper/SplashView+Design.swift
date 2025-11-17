@@ -18,7 +18,7 @@ extension SplashView {
     }
 
     func styleViews() {
-        backgroundColor = .beige
+        backgroundColor = .blue
 
         frameImageView.image = UIImage(named: BundleImage.frame.rawValue, in: .main, with: nil)
         frameImageView.contentMode = .scaleToFill
