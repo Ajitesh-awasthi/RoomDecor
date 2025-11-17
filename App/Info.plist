@@ -8,7 +8,7 @@
 		<false/>
 		<key>NSExceptionDomains</key>
 		<dict>
-			<key>172.20.10.3</key>
+			<key>172.20.10.8</key>
 			<dict>
 				<key>NSIncludesSubdomains</key>
 				<true/>

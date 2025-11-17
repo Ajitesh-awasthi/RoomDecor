@@ -55,6 +55,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     private var pendingRemoteIndex: Int? = nil                      // index of remoteItems staged for placement
     private var remoteModelLocalURLs: [Int: URL] = [:]              // downloaded local model file URLs keyed by remoteItems index
     private var isPlacingRemoteIndex = Set<Int>()
+    private var remoteLocalCache: [Int: URL] = [:]
 
     // MARK: - Cart UI + tracking
     private var cartButton: UIButton!
@@ -125,6 +126,13 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         super.viewDidLoad()
 
         print("DBG: viewDidLoad() - start")
+        navigationItem.hidesBackButton = true
+        navigationItem.largeTitleDisplayMode = .never  // avoid large-title gaps
+        
+        // prefer keeping nav bar default translucency unless you set appearance globally
+        navigationController?.navigationBar.isTranslucent = true
+
+        view.backgroundColor = .systemBackground
 
         // 1) sceneView
         sceneView = ARSCNView(frame: view.bounds)
@@ -1070,10 +1078,11 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             var items: [[String: Any]] = []
             do {
                 let json = try JSONSerialization.jsonObject(with: data, options: [])
-                if let arr = json as? [[String: Any]] {
+                if let dict = json as? [String: Any],
+                   let arr = dict["results"] as? [[String: Any]] {
                     items = arr
                 } else {
-                    if enablePanDebugPrints { print("SEARCH: response not in expected array format") }
+                    if enablePanDebugPrints { print("SEARCH: response not in expected results array format") }
                 }
             } catch {
                 if enablePanDebugPrints { print("SEARCH: JSON parse error -> \(error.localizedDescription)") }
@@ -1085,6 +1094,21 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 self.infoView.set(title: "No results")
                 return
             }
+
+            // Clear previous staged selection + temp cache
+            self.clearStagedSelectionAndCache()
+
+            // Clear other per-search caches / staging variables
+            self.remoteItems.removeAll()               // clear previous remote item list
+            self.remoteModelLocalURLs.removeAll()      // clear any index->localURL downloads
+            self.pendingRemoteIndex = nil              // cancel any pending staging
+            self.stagedRemoteIndex = nil               // ensure staged index cleared
+            self.stagedLocalURL = nil                  // ensure staged local url cleared
+            self.isPlacingRemoteIndex.removeAll()      // safe/reset any concurrency set
+
+            // Now set remoteItems and repopulate your palette
+            self.remoteItems = items
+            self.showLoading(false, message: nil)
 
             // Ensure palette exists and expand it before populating
             if self.paletteContainer == nil {
@@ -1259,13 +1283,14 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                         var items: [[String: Any]] = []
                         do {
                             let json = try JSONSerialization.jsonObject(with: data, options: [])
-                            if let arr = json as? [[String: Any]] {
+                            if let dict = json as? [String: Any],
+                               let arr = dict["results"] as? [[String: Any]] {
                                 items = arr
                             } else {
-                                if self.enablePanDebugPrints { print("IMAGE: upload response not an array") }
+                                if self.enablePanDebugPrints { print("IMAGE: response not in expected results array format") }
                             }
                         } catch {
-                            if self.enablePanDebugPrints { print("IMAGE: parse error -> \(error.localizedDescription)") }
+                            if self.enablePanDebugPrints { print("IMAGE: JSON parse error -> \(error.localizedDescription)") }
                         }
 
                         if items.isEmpty {
@@ -1279,7 +1304,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                             self.setupFloatingPalette()
                         }
                         self.setPaletteCollapsed(false, animated: true)
-
+                        self.clearStagedSelectionAndCache()
                         // Populate palette with returned items
                         self.populatePaletteItems(with: items)
 
@@ -1330,6 +1355,10 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                         let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
                             .appendingPathComponent("remote_\(idx)_\(UUID().uuidString)")
                             .appendingPathExtension(url.pathExtension)
+                        self.remoteLocalCache[idx] = tmpURL
+                        // and optionally stage it for placement
+                        self.stagedRemoteIndex = idx
+                        self.stagedLocalURL = tmpURL
                         try data.write(to: tmpURL, options: .atomic)
 
                         if self.enablePanDebugPrints { print("PAL: downloaded model for index \(idx) -> cached at \(tmpURL.path)") }
@@ -1409,6 +1438,10 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         // choose a temp file path with original extension
         let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension
         let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("remote_\(index)_\(UUID().uuidString)").appendingPathExtension(ext)
+        self.remoteLocalCache[index] = tmpURL
+        // and optionally stage it for placement
+        self.stagedRemoteIndex = index
+        self.stagedLocalURL = tmpURL
 
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
@@ -1574,8 +1607,8 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         var comps = URLComponents()
         comps.scheme = "http"
         comps.host = macIP
-        comps.port = 8093
-        comps.path = "/upload-image"
+        comps.port = 8000
+        comps.path = "/image/search"
 
         guard let url = comps.url else {
             if enablePanDebugPrints { print("UPLOAD: invalid URL for macIP=\(macIP)") }
@@ -1619,8 +1652,9 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         var comps = URLComponents()
         comps.scheme = "http"
         comps.host = macIP
-        comps.port = 8093
-        comps.path = "/prompt-search" // your search endpoint; replace if different
+        comps.port = 8000
+//        comps.path = "/prompt-search" // your search endpoint; replace if different
+        comps.path = "/text/search" // your search endpoint; replace if different
 
         guard let url = comps.url else {
             if enablePanDebugPrints { print("SEARCH: invalid URL for macIP=\(macIP) prompt=\(prompt)") }
@@ -1633,7 +1667,8 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         // JSON payload: { "request": "<prompt>" }
-        let payload: [String: String] = ["request": prompt]
+//        let payload: [String: String] = ["request": prompt]
+        let payload: [String: String] = ["prompt": prompt]
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         } catch {
@@ -1658,7 +1693,8 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     
     func getMacIP() -> String {
         // TODO: replace with a stored setting or UI input later; hard-coded for now.
-        return "172.20.10.3"
+//        return "172.20.10.3"
+        return "172.20.10.8"
     }
     
     private func removePlacedItem(for node: SCNNode) {
@@ -1704,6 +1740,36 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
     
+    private func clearStagedSelectionAndCache() {
+        // Clear staged selection
+        stagedRemoteIndex = nil
+        stagedLocalURL = nil
+
+        // Remove cached temp files (best-effort)
+        for (_, url) in remoteLocalCache {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                // ignore errors (file might already be gone) but log if debugging
+                if enablePanDebugPrints { print("CACHE: failed to remove temp file \(url): \(error.localizedDescription)") }
+            }
+        }
+        remoteLocalCache.removeAll()
+
+        // Clear visual selection in palette (if any)
+        DispatchQueue.main.async {
+            self.paletteStack?.arrangedSubviews.forEach { sub in
+                if let c = sub as? VirtualObjectCardView {
+                    c.layer.borderWidth = 0
+                    c.layer.borderColor = UIColor.clear.cgColor
+                    c.backgroundColor = UIColor.clear
+                }
+            }
+        }
+
+        if enablePanDebugPrints { print("CACHE: cleared staged selection and remoteLocalCache") }
+    }
+
     private func updateCartUI() {
         let cartCount = placedItems.count
         let totalPrice: Double = placedItems
@@ -2041,12 +2107,20 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     @MainActor
     func placeStagedLocalModel(at index: Int, localURL: URL, anchorTransform: simd_float4x4) async {
         // Small UX: ensure any loader is hidden/resolved by callers; we still log and update infoView on failure.
-        if enablePanDebugPrints { print("PAL: placing staged remote model from local url \(localURL)") }
-
+        let fileToUse = localURL ?? remoteLocalCache[index] ?? stagedLocalURL
+        guard let finalURL = fileToUse else {
+            // fail nicely
+            await MainActor.run {
+                self.infoView.set(title: "Model not downloaded")
+                self.showLoading(false, message: nil)
+            }
+            return
+        }
+        if enablePanDebugPrints { print("PAL: placing staged remote model from local url \(finalURL)") }
         // Try loading the scene (preferred SCNScene(url:) path)
         do {
             // Attempt to load scene - this handles .usdz/.scn etc that SceneKit supports
-            let scene = try SCNScene(url: localURL, options: nil)
+            let scene = try SCNScene(url: finalURL, options: nil)
             if enablePanDebugPrints { print("PAL: loaded using SCNScene(url:)") }
 
             // Collect children into a single container for easier manipulation
@@ -2060,7 +2134,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             let size = SCNVector3(x: maxVec.x - minVec.x, y: maxVec.y - minVec.y, z: maxVec.z - minVec.z)
             let maxSide = max(size.x, max(size.y, size.z))
             // desired largest dimension in meters (tweakable)
-            let desiredMaxSize: Float = 0.35
+            let desiredMaxSize: Float = 0.8
             if maxSide > 0 {
                 let scale = desiredMaxSize / maxSide
                 container.scale = SCNVector3(scale, scale, scale)
@@ -2117,11 +2191,20 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     
     @MainActor
     func placeStagedLocalModel(at index: Int, localURL: URL, worldPosition: simd_float3, alignWithCameraYaw: Bool) async {
-        if enablePanDebugPrints { print("PAL: placing staged remote model from local url \(localURL) at worldPos=\(worldPosition) alignWithCameraYaw=\(alignWithCameraYaw)") }
+        let fileToUse = localURL ?? remoteLocalCache[index] ?? stagedLocalURL
+        guard let finalURL = fileToUse else {
+            // fail nicely
+            await MainActor.run {
+                self.infoView.set(title: "Model not downloaded")
+                self.showLoading(false, message: nil)
+            }
+            return
+        }
+        if enablePanDebugPrints { print("PAL: placing staged remote model from local url \(finalURL) at worldPos=\(worldPosition) alignWithCameraYaw=\(alignWithCameraYaw)") }
 
         do {
             // Preferred loading route: SCNScene(url:)
-            let scene = try SCNScene(url: localURL, options: nil)
+            let scene = try SCNScene(url: finalURL, options: nil)
             if enablePanDebugPrints { print("PAL: loaded using SCNScene(url:)") }
 
             // merge children into a single container node for easier transforms
@@ -2138,7 +2221,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 z: maxVec.z - minVec.z
             )
             let maxSide = max(size.x, max(size.y, size.z))
-            let desiredMaxSize: Float = 0.35 // in meters; tweak if you want larger/smaller defaults
+            let desiredMaxSize: Float = 0.8 // in meters; tweak if you want larger/smaller defaults
             if maxSide > 0.0 {
                 let scaleFactor = desiredMaxSize / maxSide
                 container.scale = SCNVector3(scaleFactor, scaleFactor, scaleFactor)
@@ -2684,29 +2767,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
         return (minVec, maxVec)
     }
-    
-//    @objc private func cartIconTapped(_ sender: UIButton) {
-//        // Prepare the cart items from this controller's state
-//        // Replace the lines below with how you actually keep items in this controller.
-//        let controllerCartItems: [CartModel] = placedItems.map {
-//            // example mapping: adjust to your actual placedItems structure
-//            let cartModel = CartModel()
-////            cartModel.id = $0.id
-//            cartModel.count = $0.count
-////            cartModel.images = $0.images
-//            cartModel.price = $0.price
-//            cartModel.title = $0.name
-//            return cartModel
-//        }
-//
-//        // Present UIKit CartViewController
-//        let cartVC = CartViewController(items: controllerCartItems)
-//        let nav = UINavigationController(rootViewController: cartVC)
-//        nav.modalPresentationStyle = .automatic
-//        present(nav, animated: true)
-//    }
-
-
 }
 
 extension VirtualObjectViewController: ARSCNViewDelegate {

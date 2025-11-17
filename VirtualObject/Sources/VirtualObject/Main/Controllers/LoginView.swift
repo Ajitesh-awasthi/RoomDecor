@@ -63,14 +63,14 @@ public struct WelcomeView: View {
                 // BUTTONS (MODERN FLOATING CARDS)
                 VStack(spacing: 20) {
                     ModernOptionButton(
-                        title: "Customize",
-                        subtitle: "Design your own setup",
-                        icon: "paintbrush.fill",
+                        title: "Live Preview",
+                        subtitle: "Try live in your space",
+                        icon: "eye.fill",
                         action: openVirtualAction
                     )
                     
                     ModernOptionButton(
-                        title: "Automate",
+                        title: "Design my room",
                         subtitle: "AI recommended setup",
                         icon: "sparkles",
                         action: openRoomScanAction
