@@ -55,7 +55,10 @@ extension VirtualObjectViewController {
     // Replace styleViews()
     public func styleViews() {
         print("DBG: styleViews() - start")
-        navigationController?.setNavigationBarHidden(false, animated: false)
+//        navigationController?.setNavigationBarHidden(false, animated: false)
+//        navigationController?.navigationBar.prefersLargeTitles = false
+//        navigationController?.navigationBar.isTranslucent = true     // or false if you want opaque nav bar
+//        navigationItem.largeTitleDisplayMode = .never
 
         // Sight image
         sightImageView.image = UIImage(named: BundleImage.sight.rawValue, in: .module, with: nil)
@@ -124,7 +127,7 @@ extension VirtualObjectViewController {
             $0.leading.trailing.equalToSuperview().inset(defaultPadding * 2)
             $0.height.equalTo(44)
         }
-
+        
         // Bring button to front again after constraints
         view.layoutIfNeeded()
         view.bringSubviewToFront(virtualObjectButton)

@@ -4,6 +4,7 @@ import UIKit
 import Core
 import CoreUi
 import ModelIO
+import SwiftUI
 
 public class VirtualObjectViewController: UIViewController, UIGestureRecognizerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UISearchBarDelegate {
 
@@ -69,7 +70,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
 
     // MARK: - Search / Upload UI
     private var searchContainer: UIView?
-    private var searchBar: UISearchBar?
+    internal var searchBar: UISearchBar?
     private var cameraButton: UIButton?
     private var searchCameraButton: UIButton?
     private var selectedImage: UIImage?                             // last selected image to send to API
@@ -102,6 +103,19 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     // smoothing factor default (tweakable) — lower = stronger smoothing
     private var panSmoothingFactor: Float = 0.18
     private let enablePanDebugPrints = true
+    private let categoryTypicalMaxMeters: [String: Float] = [
+        "bed_large": 2.3, "bed_medium": 2, "bed_small": 1.5,
+        "sofa_large": 2, "sofa_medium": 1.7, "sofa_small": 1.5,
+        "wardrobe_large": 2, "wardrobe_medium": 1.7, "wardrobe_small": 1.5,
+        "dessing_table_large": 1.7, "dessing_table_medium": 1.6, "dessing_table_small": 1.5,
+        "lamp_large": 0.6, "lamp_medium": 0.5, "lamp_small": 0.4,
+        "book_shelf_large": 2, "book_shelf_medium": 1.8, "book_shelf_small": 1.6,
+        "chair_large": 0.6, "chair_medium": 0.5, "chair_small": 0.4,
+        "pot_large": 0.4, "pot_medium": 0.3, "pot_small": 0.2,
+        "table_large": 0.6, "table_medium": 0.5, "table_small": 0.4,
+        "study_table_large": 0.8, "study_table_medium": 0.7, "study_table_small": 0.6
+        // add more categories you commonly receive
+    ]
 
     // MARK: - Combine / Publishers / Disposables
     private var disposables = Set<AnyCancellable>()
@@ -843,7 +857,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         priceLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
         priceLabel.textColor = .white
         priceLabel.textAlignment = .right
-        priceLabel.text = "0 INR"
+        priceLabel.text = "0 USD"
         priceLabel.tag = 0xCA0003
         container.addSubview(priceLabel)
 
@@ -851,11 +865,12 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             priceLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
             priceLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor)
         ])
+        
+        // Add tap gesture recognizer to the container
+        let tap = UITapGestureRecognizer(target: self, action: #selector(cartButtonTapped))
+        tap.delegate = self
+        container.addGestureRecognizer(tap)
 
-
-        // ------------------------------------------------------
-        //  🔥 THIS IS THE “CACHING” YOU DIDN’T UNDERSTAND
-        // ------------------------------------------------------
         self.cartContainerView = container
         self.cartBadgeLabel = badgeLabel
         self.cartPriceLabel = priceLabel
@@ -900,6 +915,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             let width = dict["width"] as? NSNumber
             let height = dict["height"] as? NSNumber
             let dimUnit = dict["dimUnit"] as? String ?? ""
+            let itemSize = dict["size"] as? String ?? ""
 
             // Configure title label (we will place it under rating)
             if let tLabel = card.titleLabel {
@@ -948,12 +964,12 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             // Size label below image — allow wrap and full text (no truncation)
             let sizeLabel = UILabel()
             sizeLabel.translatesAutoresizingMaskIntoConstraints = false
-            sizeLabel.font = UIFont.systemFont(ofSize: 12, weight: .regular)
+            sizeLabel.font = UIFont.systemFont(ofSize: 10, weight: .regular)
             sizeLabel.textAlignment = .center
             sizeLabel.numberOfLines = 1
             sizeLabel.lineBreakMode = .byClipping
             if let l = length?.doubleValue, let w = width?.doubleValue, let h = height?.doubleValue {
-                sizeLabel.text = String(format: "%.1f x %.1f x %.1f %@", l, w, h, dimUnit)
+                sizeLabel.text = String(format: "%.1f x %.1f x %.1f %@    %@", l, w, h, dimUnit, itemSize)
             } else {
                 sizeLabel.text = ""
             }
@@ -1466,9 +1482,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         do {
             var containerNode: SCNNode? = nil
 
-            // ------------------------------------------------------
-            // 1) Try to load via SceneKit (.usdz/.scn/usda)
-            // ------------------------------------------------------
             if let scn = try? SCNScene(url: localURL, options: nil) {
                 let root = SCNNode()
                 for child in scn.rootNode.childNodes {
@@ -1477,10 +1490,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 containerNode = root
                 if enablePanDebugPrints { print("PAL: loaded using SCNScene(url:)") }
             }
-
-            // ------------------------------------------------------
-            // 3) If still nil → model is invalid
-            // ------------------------------------------------------
+            
             guard let container = containerNode else {
                 await MainActor.run {
                     self.infoView.set(title: "Model load failed")
@@ -1495,19 +1505,17 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             let (minB, maxB) = container.boundingBox
             let size = SCNVector3(maxB.x - minB.x, maxB.y - minB.y, maxB.z - minB.z)
             let maxSide = max(size.x, max(size.y, size.z))
+            let category_prod = dict["category"] as? String ?? ""
+            let size_prod = dict["size"] as? String ?? ""
+//            let desired = categoryTypicalMaxMeters[category] ?? 1.8
 
             if maxSide > 0 {
-                let desired: Float = 0.5     // ~50 cm max dimension
+                let desired = categoryTypicalMaxMeters[category_prod.lowercased() + "_" + size_prod.lowercased()] ?? 1.8     // ~50 cm max dimension
                 let scale = desired / maxSide
                 container.scale = SCNVector3(scale, scale, scale)
                 if enablePanDebugPrints { print("PAL: auto-scaled by \(scale)") }
             }
 
-            // ------------------------------------------------------
-            // Position in front of camera (~0.6m)
-            // ------------------------------------------------------
-            // --- New placement: place onto detected horizontal plane and align model bottom ---
-            // Compute model bounding box (in container local space)
             let modelHeightLocal = maxB.y - minB.y
             let modelBottomLocal = minB.y
 
@@ -1528,10 +1536,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 let worldY = w.columns.3.y
                 let worldZ = w.columns.3.z
 
-                // compute container world position such that the bottom of the model sits on worldY
-                // We must convert the modelBottomLocal (in container local coords) to world units after scaling is applied.
-                // We'll compute scale first (see scaling code above in your method), then use it here.
-                // assume container.scale already set by auto-scaling earlier in method
                 let scale = container.scale
                 // modelBottom in world Y offset = modelBottomLocal * scale.y
                 let bottomOffsetWorldY = modelBottomLocal * scale.y
@@ -1574,13 +1578,8 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 }
             }
 
-            // Name and add the node
             container.name = "remoteModel_\(UUID().uuidString)"
 
-
-            // ------------------------------------------------------
-            // Place into scene
-            // ------------------------------------------------------
             await MainActor.run {
                 self.sceneView.scene.rootNode.addChildNode(container)
                 self.selectedNode = container
@@ -1607,7 +1606,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         var comps = URLComponents()
         comps.scheme = "http"
         comps.host = macIP
-        comps.port = 8000
+        comps.port = getMacPort()
         comps.path = "/image/search"
 
         guard let url = comps.url else {
@@ -1652,8 +1651,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         var comps = URLComponents()
         comps.scheme = "http"
         comps.host = macIP
-        comps.port = 8000
-//        comps.path = "/prompt-search" // your search endpoint; replace if different
+        comps.port = getMacPort()
         comps.path = "/text/search" // your search endpoint; replace if different
 
         guard let url = comps.url else {
@@ -1667,7 +1665,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         // JSON payload: { "request": "<prompt>" }
-//        let payload: [String: String] = ["request": prompt]
         let payload: [String: String] = ["prompt": prompt]
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
@@ -1694,7 +1691,12 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     func getMacIP() -> String {
         // TODO: replace with a stored setting or UI input later; hard-coded for now.
 //        return "172.20.10.3"
-        return "172.20.10.8"
+        return "172.20.10.3"
+    }
+    
+    func getMacPort() -> Int {
+        return 8093
+        //return 8000
     }
     
     private func removePlacedItem(for node: SCNNode) {
@@ -1725,9 +1727,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
                 }
             }
 
-            // Last resort: try to match by some unique field in your dict (like imageLink3D) using pointer or node's stored info.
-            // If you previously stored some identifier in node's name or in-memory mapping use that here.
-            // If nothing matched, just log
             if self.enablePanDebugPrints { print("PAL: removePlacedItem -> no placed item matched node \(node.name ?? "<unnamed>")") }
         }
     }
@@ -1938,7 +1937,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
 
-    // Replace existing handleTap(_:) with this simpler, raycast-based version
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: sceneView)
 
@@ -1981,44 +1979,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             return
         }
 
-        if let stagedIndex = stagedRemoteIndex,
-           let localURL = stagedLocalURL {
-            // We have a staged item -> place it at the tap point if we can raycast to plane
-            if let query = sceneView.raycastQuery(from: location, allowing: .estimatedPlane, alignment: .horizontal) {
-                let results = sceneView.session.raycast(query)
-                if let first = results.first {
-                    // use the worldTransform result directly (simd_float4x4)
-                    Task { @MainActor in
-                        await placeStagedLocalModel(at: stagedIndex, localURL: localURL, anchorTransform: first.worldTransform)
-                    }
-                    setPaletteCollapsed(true, animated: true)
-                    return
-                }
-            }
-
-            // No plane -> fallback: place in front of camera at fixed distance
-            if let pov = sceneView.pointOfView {
-                let forwardLocal = SCNVector3(0, 0, -0.6) // 0.6m forward
-                let worldPosSCN = pov.convertPosition(forwardLocal, to: sceneView.scene.rootNode)
-
-                // Convert SCNVector3 -> simd_float3
-                let worldPos = simd_float3(worldPosSCN.x, worldPosSCN.y, worldPosSCN.z)
-
-                Task { @MainActor in
-                    await placeStagedLocalModel(
-                        at: stagedIndex,
-                        localURL: localURL,
-                        worldPosition: worldPos,
-                        alignWithCameraYaw: true
-                    )
-                }
-
-                setPaletteCollapsed(true, animated: true)
-                return
-            }
-        }
-
-
         // If no staged model and no SceneKit hit: deselect existing selection
         if let prev = selectedNode {
             highlight(node: prev, highlight: false)
@@ -2026,7 +1986,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
 
-    // Replace your complex handlePan(_:) with this simpler raycast-based pan
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         // Only act if a node is selected
         guard let node = selectedNode else { return }
@@ -2102,189 +2061,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         default:
             break
         }
-    }
-    
-    @MainActor
-    func placeStagedLocalModel(at index: Int, localURL: URL, anchorTransform: simd_float4x4) async {
-        // Small UX: ensure any loader is hidden/resolved by callers; we still log and update infoView on failure.
-        let fileToUse = localURL ?? remoteLocalCache[index] ?? stagedLocalURL
-        guard let finalURL = fileToUse else {
-            // fail nicely
-            await MainActor.run {
-                self.infoView.set(title: "Model not downloaded")
-                self.showLoading(false, message: nil)
-            }
-            return
-        }
-        if enablePanDebugPrints { print("PAL: placing staged remote model from local url \(finalURL)") }
-        // Try loading the scene (preferred SCNScene(url:) path)
-        do {
-            // Attempt to load scene - this handles .usdz/.scn etc that SceneKit supports
-            let scene = try SCNScene(url: finalURL, options: nil)
-            if enablePanDebugPrints { print("PAL: loaded using SCNScene(url:)") }
-
-            // Collect children into a single container for easier manipulation
-            let container = SCNNode()
-            for child in scene.rootNode.childNodes {
-                container.addChildNode(child)
-            }
-
-            // Compute bounding and auto-scale to reasonable size
-            let (minVec, maxVec) = container.boundingBox
-            let size = SCNVector3(x: maxVec.x - minVec.x, y: maxVec.y - minVec.y, z: maxVec.z - minVec.z)
-            let maxSide = max(size.x, max(size.y, size.z))
-            // desired largest dimension in meters (tweakable)
-            let desiredMaxSize: Float = 0.8
-            if maxSide > 0 {
-                let scale = desiredMaxSize / maxSide
-                container.scale = SCNVector3(scale, scale, scale)
-                if enablePanDebugPrints { print("PAL: auto-scaled by \(scale) (model maxSide=\(maxSide))") }
-            } else {
-                if enablePanDebugPrints { print("PAL: model had zero maxSide, skipping auto-scale") }
-            }
-
-            // Compute placement position from anchorTransform (world)
-            let anchorPos = simd_make_float3(anchorTransform.columns.3.x, anchorTransform.columns.3.y, anchorTransform.columns.3.z)
-
-            // Compute bottom offset (in node-local coords) and convert to world offset by applying scale.y
-            // boundingBox.min is in local coordinates; when scaled, bottom world offset ~= minY * scale
-            let bottomLocalY = minVec.y
-            let bottomOffsetWorldY = bottomLocalY * container.scale.y
-
-            // Final Y so that the bottom of the model sits on the plane (anchor Y) with minPlaneClearance
-            let finalY = anchorPos.y + (-bottomOffsetWorldY) + minPlaneClearance
-
-            // Place at anchor X,Z and computed Y
-            let placement = SCNVector3(anchorPos.x, finalY, anchorPos.z)
-            container.position = placement
-
-            // Align yaw with camera so model faces same direction as camera (optional)
-            if let pov = sceneView.pointOfView {
-                container.eulerAngles.y = pov.eulerAngles.y
-            }
-
-            // Give a unique name (useful for selection / deletion)
-            container.name = "remoteModel_\(UUID().uuidString)"
-
-            // Add to scene and book-keep on main actor (already @MainActor)
-            sceneView.scene.rootNode.addChildNode(container)
-            selectedNode = container
-            highlight(node: container, highlight: true)
-
-            // Bookkeeping: add to placedItems and cart (if index provided)
-            if index >= 0 && index < remoteItems.count {
-                let dict = remoteItems[index]
-                addPlacedItem(dict, at: index)
-                infoView.set(title: dict["itemName"] as? String ?? "Model placed")
-                if enablePanDebugPrints { print("PAL: placed model on plane at y=\(finalY) -> container.y=\(container.position.y)") }
-            } else {
-                // if index not provided, still set a simple info message
-                infoView.set(title: "Model placed")
-                if enablePanDebugPrints { print("PAL: placed model (no remoteItems index)") }
-            }
-        } catch {
-            // Loading failed — inform user
-            infoView.set(title: "Model load failed")
-            if enablePanDebugPrints { print("PAL: placeStagedLocalModel error -> \(error.localizedDescription)") }
-        }
-    }
-    
-    @MainActor
-    func placeStagedLocalModel(at index: Int, localURL: URL, worldPosition: simd_float3, alignWithCameraYaw: Bool) async {
-        let fileToUse = localURL ?? remoteLocalCache[index] ?? stagedLocalURL
-        guard let finalURL = fileToUse else {
-            // fail nicely
-            await MainActor.run {
-                self.infoView.set(title: "Model not downloaded")
-                self.showLoading(false, message: nil)
-            }
-            return
-        }
-        if enablePanDebugPrints { print("PAL: placing staged remote model from local url \(finalURL) at worldPos=\(worldPosition) alignWithCameraYaw=\(alignWithCameraYaw)") }
-
-        do {
-            // Preferred loading route: SCNScene(url:)
-            let scene = try SCNScene(url: finalURL, options: nil)
-            if enablePanDebugPrints { print("PAL: loaded using SCNScene(url:)") }
-
-            // merge children into a single container node for easier transforms
-            let container = SCNNode()
-            for child in scene.rootNode.childNodes {
-                container.addChildNode(child)
-            }
-
-            // Compute bounding box & auto-scale to reasonable size
-            let (minVec, maxVec) = container.boundingBox
-            let size = SCNVector3(
-                x: maxVec.x - minVec.x,
-                y: maxVec.y - minVec.y,
-                z: maxVec.z - minVec.z
-            )
-            let maxSide = max(size.x, max(size.y, size.z))
-            let desiredMaxSize: Float = 0.8 // in meters; tweak if you want larger/smaller defaults
-            if maxSide > 0.0 {
-                let scaleFactor = desiredMaxSize / maxSide
-                container.scale = SCNVector3(scaleFactor, scaleFactor, scaleFactor)
-                if enablePanDebugPrints { print("PAL: auto-scaled by \(scaleFactor) (model maxSide=\(maxSide))") }
-            } else {
-                if enablePanDebugPrints { print("PAL: model has zero maxSide -> skipping auto-scale") }
-            }
-
-            // Compute bottom offset in world coordinates after scaling (minVec.y is local)
-            let bottomLocalY = minVec.y
-            let bottomOffsetWorldY = bottomLocalY * container.scale.y
-
-            // Final Y so bottom rests on provided worldPosition.y (plus small clearance)
-            let finalY = worldPosition.y - bottomOffsetWorldY + minPlaneClearance
-
-            // Place at worldPosition.x/z and computed finalY
-            container.position = SCNVector3(worldPosition.x, finalY, worldPosition.z)
-
-            // Optionally align yaw to camera orientation (so object faces same direction as camera)
-            if alignWithCameraYaw, let pov = sceneView.pointOfView {
-                container.eulerAngles.y = pov.eulerAngles.y
-            }
-
-            // Name the node for selection/deletion bookkeeping
-            container.name = "remoteModel_\(UUID().uuidString)"
-
-            // Add to scene and do bookkeeping on main actor
-            sceneView.scene.rootNode.addChildNode(container)
-            selectedNode = container
-            highlight(node: container, highlight: true)
-
-            // Bookkeeping: add to placedItems and update cart if index valid
-            if index >= 0 && index < remoteItems.count {
-                let dict = remoteItems[index]
-                addPlacedItem(dict, at: index)
-                infoView.set(title: dict["itemName"] as? String ?? "Model placed")
-                if enablePanDebugPrints { print("PAL: placed model on plane at y=\(finalY) -> container.y=\(container.position.y)") }
-            } else {
-                infoView.set(title: "Model placed")
-                if enablePanDebugPrints { print("PAL: placed model (no remoteItems index)") }
-            }
-        } catch {
-            infoView.set(title: "Model load failed")
-            if enablePanDebugPrints { print("PAL: placeStagedLocalModel error -> \(error.localizedDescription)") }
-        }
-    }
-
-    @MainActor
-    func placeStagedLocalModel(at index: Int, localURL: URL, anchorTransform: simd_float4x4, alignWithCameraYaw: Bool) async {
-        let t = anchorTransform.columns.3
-        let worldPos = simd_float3(t.x, t.y, t.z)
-
-        if enablePanDebugPrints {
-            print("DBG: placing using anchorTransform, extracted worldPos=\(worldPos)")
-        }
-
-        // Now call the existing worldPosition version
-        await placeStagedLocalModel(
-            at: index,
-            localURL: localURL,
-            worldPosition: worldPos,
-            alignWithCameraYaw: alignWithCameraYaw
-        )
     }
 
     private func highlight(node: SCNNode, highlight: Bool) {
@@ -2460,15 +2236,54 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
 
-    @objc private func cartButtonTapped(_ sender: Any?) {
-        // Present a simple list or summary — for now, just print debug and show infoView.
+    @objc func cartButtonTapped(_ sender: Any?) {
+        // Convert placedItems ([[String:Any]]) -> [CartModel]
         if enablePanDebugPrints { print("CART: tapped, items=\(placedItems.count)") }
-        if placedItems.isEmpty {
-            infoView.set(title: "Cart is empty")
+        let rawModels: [CartModel] = placedItems.map { dict in
+            let title = (dict["itemName"] as? String) ?? (dict["title"] as? String) ?? "Item"
+            // price may be NSNumber, Double, or String
+            var priceDouble: Double = 0.0
+            if let n = dict["price"] as? NSNumber { priceDouble = n.doubleValue }
+            else if let d = dict["price"] as? Double { priceDouble = d }
+            else if let s = dict["price"] as? String, let d = Double(s) { priceDouble = d }
+
+            var images: [String] = []
+            if let s = dict["imageLink2D"] as? String { images.append(s) }
+            if images.isEmpty, let alt = dict["image"] as? String { images.append(alt) }
+
+            // preserve repeats as separate items (if you want to collapse duplicates, dedupe here)
+            return CartModel(title: title, price: priceDouble, images: images, count: 1)
+        }
+        
+        // Now merge duplicates by title
+        var merged: [String: CartModel] = [:]
+
+        for item in rawModels {
+            if let existing = merged[item.title] {
+                existing.count += 1
+            } else {
+                merged[item.title] = item
+            }
+        }
+
+        let models = Array(merged.values)
+
+        // Prepare a viewModel with these items
+        let vm = CartViewModel(items: models)
+
+        // Create SwiftUI CartView with injected viewModel
+        let cartView = CartView(viewModel: vm)
+
+        // Wrap in hosting controller
+        let host = UIHostingController(rootView: cartView)
+
+        // If you're inside a navigation controller, prefer push so the nav bar/back works
+        if let nav = self.navigationController {
+            nav.pushViewController(host, animated: true)
         } else {
-            // Show summary: count + total
-            let totalText = cartTotalLabel.text ?? ""
-            infoView.set(title: "Items: \(placedItems.count) • \(totalText)")
+            // otherwise present modally (full screen)
+            host.modalPresentationStyle = .fullScreen
+            self.present(host, animated: true)
         }
     }
 
@@ -2887,18 +2702,13 @@ extension VirtualObjectViewController: FloatingPaletteViewDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             if self.enablePanDebugPrints { print("PAL: preloading model '\(type.rawValue)' in background") }
-            // If presenter exposes a preload API, call it — this example assumes `loadVirtualObject(named:)` is private.
-            // If you created a public preload method, call that here. Fallback: attempt to load via addVirtualObject with an immediate invalid raycast check avoided.
             self.presenter.preloadVirtualObject(named: type.rawValue) // optional API if you added it to presenter
             if self.enablePanDebugPrints { print("PAL: preload for '\(type.rawValue)' completed (if supported)") }
         }
 
-        // Provide immediate feedback to user: show selected thumbnail on the add button (optional)
         DispatchQueue.main.async {
-            // If using UIButton.Configuration (iOS 15+), set an image on the left of the title
             if #available(iOS 15.0, *) {
                 if var cfg = self.virtualObjectButton.configuration {
-                    // If the palette or your assets include a 2D thumbnail, set it here. Otherwise, use a symbol to indicate selection.
                     let sym = UIImage(systemName: "checkmark.circle.fill")
                     cfg.image = sym
                     cfg.imagePadding = 8
@@ -2918,9 +2728,6 @@ extension VirtualObjectViewController: FloatingPaletteViewDelegate {
                 self.virtualObjectButton.setImage(sym, for: .normal)
                 self.virtualObjectButton.imageEdgeInsets = UIEdgeInsets(top: 0, left: -8, bottom: 0, right: 8)
             }
-
-            // Optionally collapse the palette visually (or leave expanded until user taps Place)
-            // self.setPaletteCollapsed(true, animated: true)
         }
     }
     func floatingPaletteDidToggle(_ palette: FloatingPaletteView, expanded: Bool) {

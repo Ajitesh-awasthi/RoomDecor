@@ -12,10 +12,9 @@ import Foundation
 public class CartModel: ObservableObject, Codable {
   
     enum CodingKeys: CodingKey {
-        case id, title, price, brand, images, count
+        case title, price, images, count
     }
     
-    public var id: Int = 0
     public var title: String = ""
     public var price: Double = 0
     public var images: [String] = []
@@ -23,7 +22,6 @@ public class CartModel: ObservableObject, Codable {
     
     static var sampleCartModel: CartModel {
         let cartModel = CartModel()
-        cartModel.id = 1
         cartModel.count = 1
         cartModel.images = ["https://cdn.dummyjson.com/products/images/fragrances/Dolce%20Shine%20Eau%20de/3.png"]
         cartModel.price = 3.3333
@@ -32,11 +30,22 @@ public class CartModel: ObservableObject, Codable {
     }
     
     init() {}
+    
+    public init(
+        title: String,
+        price: Double,
+        images: [String],
+        count: Int
+    ) {
+        self.title = title
+        self.price = price
+        self.images = images
+        self.count = count
+    }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
-        try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
         try container.encode(price, forKey: .price)
         try container.encode(count, forKey: .count)
@@ -45,7 +54,6 @@ public class CartModel: ObservableObject, Codable {
         
     public required init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(Int.self, forKey: .id)
         self.title = try container.decode(String.self, forKey: .title)
         self.price = try container.decode(Double.self, forKey: .price)
         self.images = try container.decode([String].self, forKey: .images)
@@ -55,14 +63,12 @@ public class CartModel: ObservableObject, Codable {
 
 extension CartModel: Hashable {
     public static func == (lhs: CartModel, rhs: CartModel) -> Bool {
-        return lhs.id == rhs.id &&
-               lhs.title == rhs.title &&
+        return lhs.title == rhs.title &&
                lhs.price == rhs.price &&
                lhs.images == rhs.images
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
         hasher.combine(title)
         hasher.combine(price)
         hasher.combine(images)

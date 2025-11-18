@@ -1,6 +1,6 @@
 public protocol SwitchModuleRouterProtocol {
 
-    func authorViewTap()
+//    func authorViewTap()
 
     func switchModule()
 

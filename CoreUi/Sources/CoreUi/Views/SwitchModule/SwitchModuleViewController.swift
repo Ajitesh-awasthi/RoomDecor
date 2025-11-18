@@ -53,7 +53,6 @@ public class SwitchModuleViewController: UIViewController {
                 guard let self else { return }
 
                 self.onDismiss?()
-                self.presenter.authorViewTap()
             }
             .store(in: &disposables)
 

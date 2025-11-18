@@ -1,6 +1,5 @@
 import UIKit
 import Resolver
-import Author
 import CoreUi
 import RoomScan
 import SwiftUI
@@ -12,24 +11,11 @@ class AppRouter:
     NSObject,
     VirtualObjectRouterProtocol,
     RoomScanRouterProtocol,
-    SwitchModuleRouterProtocol,
-    AuthorRouterProtocol {
+    SwitchModuleRouterProtocol{
 
     private let navigationController = UINavigationController()
     private let container: Resolver
     private lazy var coordinator = Coordinator()
-
-//    private lazy var initialViewController: UIViewController = {
-//        let supportsLidar: Bool = UserDefaults.standard.bool(forKey: "supportLidar")
-//
-//        if supportsLidar {
-//            let initialViewController: RoomScanLandingViewController = container.resolve(args: false)
-//            return initialViewController
-//        } else {
-//            let initialViewController: VirtualObjectLandingViewController = container.resolve()
-//            return initialViewController
-//        }
-//    }()
     
     private lazy var initialViewController: UIViewController = {
         // Create the WelcomeView — provide actions that call AppRouter functions
@@ -56,8 +42,6 @@ class AppRouter:
         super.init()
         // wire coordinator back to this router so SwiftUI can call router actions
         coordinator.setAppRouter(self)
-
-        configureNavigationBar()
     }
 
     private var currentViewController: UIViewController? {
@@ -69,10 +53,6 @@ class AppRouter:
 
         window?.rootViewController = navigationController
         window?.makeKeyAndVisible()
-
-        if initialViewController is VirtualObjectLandingViewController {
-            showError(for: .missingLidar)
-        }
     }
     
     func presentCart(with items: [CartModel], animated: Bool = true) {
@@ -128,11 +108,6 @@ class AppRouter:
             print("✅ RoomRedesign UI presented successfully")
         }
     }
-    
-    func showVirtualObjectLandingViewController() {
-        let virtualObjectLandingViewController: VirtualObjectLandingViewController = container.resolve()
-        replaceLastViewController(with: virtualObjectLandingViewController)
-    }
 
     public func showVirtualObjectViewController(for type: VirtualObjectType) {
         let virtualObjectViewController: VirtualObjectViewController = container.resolve(args: type)
@@ -160,17 +135,12 @@ class AppRouter:
         navigationController.present(modalViewController, animated: true)
     }
 
-    public func authorViewTap() {
-        let authorViewController: AuthorViewController = container.resolve()
-        navigationController.pushViewController(authorViewController, animated: true)
-    }
-
     public func switchModule() {
-        if navigationController.viewControllers.last is RoomScanLandingViewController {
-            showVirtualObjectLandingViewController()
-        } else if navigationController.viewControllers.last is VirtualObjectLandingViewController {
-            showRoomScanLandingViewController()
-        }
+//        if navigationController.viewControllers.last is RoomScanLandingViewController {
+//            showVirtualObjectLandingViewController()
+//        } else if navigationController.viewControllers.last is VirtualObjectLandingViewController {
+//            showRoomScanLandingViewController()
+//        }
     }
 
     public func presentShareSheet(for items: [URL]) {
@@ -183,13 +153,6 @@ class AppRouter:
         guard let url else { return }
 
         UIApplication.shared.open(url)
-    }
-
-    private func configureNavigationBar() {
-        navigationController.delegate = self
-        UINavigationBar.appearance().backIndicatorImage = UIImage(with: .back)
-        UINavigationBar.appearance().backIndicatorTransitionMaskImage = UIImage(with: .back)
-        UINavigationBar.appearance().backItem?.title = ""
     }
 
     public func showErrorPopup(for type: RoomScanErrorType) {
@@ -243,25 +206,6 @@ extension AppRouter {
 
         viewControllers[viewControllers.count - 1] = viewController
         navigationController.setViewControllers(viewControllers, animated: animated)
-    }
-
-}
-
-// MARK: - Custom navigation transition
-extension AppRouter: UINavigationControllerDelegate {
-
-    public func navigationController(
-        _ navigationController: UINavigationController,
-        animationControllerFor operation: UINavigationController.Operation,
-        from fromVC: UIViewController,
-        to toVC: UIViewController
-    ) -> UIViewControllerAnimatedTransitioning? {
-        guard
-            fromVC is VirtualObjectLandingViewController && toVC is RoomScanLandingViewController ||
-            fromVC is RoomScanLandingViewController && toVC is VirtualObjectLandingViewController
-        else { return nil }
-
-        return TransitionManager(duration: 1.5)
     }
 
 }

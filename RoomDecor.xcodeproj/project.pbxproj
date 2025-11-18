@@ -10,7 +10,6 @@
 		652D38572BC5AC2E001FCBC5 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 652D38562BC5AC2E001FCBC5 /* LaunchScreen.storyboard */; };
 		65429B332AF97C40000062BB /* SnapKit in Frameworks */ = {isa = PBXBuildFile; productRef = 65429B322AF97C40000062BB /* SnapKit */; };
 		6552C41A2BC5ADF400E6C1AD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6552C4192BC5ADF400E6C1AD /* Assets.xcassets */; };
-		656314A32BC70B5700A3087B /* Author in Frameworks */ = {isa = PBXBuildFile; productRef = 656314A22BC70B5700A3087B /* Author */; };
 		659DE2EB2AF6C7B400608313 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659DE2EA2AF6C7B400608313 /* AppDelegate.swift */; };
 		659DE2ED2AF6C7B400608313 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659DE2EC2AF6C7B400608313 /* SceneDelegate.swift */; };
 		659DE31C2AF6C92C00608313 /* Resolver in Frameworks */ = {isa = PBXBuildFile; productRef = 659DE31B2AF6C92C00608313 /* Resolver */; };
@@ -42,7 +41,6 @@
 		652D38562BC5AC2E001FCBC5 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		653E5AE12BCA663A006DCB51 /* RoomDecor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RoomDecor.entitlements; sourceTree = "<group>"; };
 		6552C4192BC5ADF400E6C1AD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		656314A12BC7090E00A3087B /* Author */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Author; sourceTree = "<group>"; };
 		6583200D2BC9C7A60088D1BC /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		659DE2E72AF6C7B400608313 /* RoomDecor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomDecor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		659DE2EA2AF6C7B400608313 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -55,8 +53,6 @@
 		65F8B5B82BA5ACE6006635F5 /* Core */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Core; sourceTree = "<group>"; };
 		65F8B5BB2BA5B9A1006635F5 /* CoreUi */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = CoreUi; sourceTree = "<group>"; };
 		FA136FA12ECB8F8E009B71B7 /* Coordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Coordinator.swift; sourceTree = "<group>"; };
-		FA136FA62ECBB98E009B71B7 /* AuthorInfoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AuthorInfoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		FA136FA72ECBB98E009B71B7 /* AuthorInfoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AuthorInfoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FA136FA82ECBBACC009B71B7 /* RoomRedesign */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RoomRedesign; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -66,7 +62,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				65F8B5B12BA5AB49006635F5 /* VirtualObject in Frameworks */,
-				656314A32BC70B5700A3087B /* Author in Frameworks */,
 				65429B332AF97C40000062BB /* SnapKit in Frameworks */,
 				659DE31E2AF6C92C00608313 /* Resolver-Static in Frameworks */,
 				65D900A62BA5BCFD008BE952 /* CoreUi in Frameworks */,
@@ -74,20 +69,6 @@
 				65F8B5AF2BA5AB45006635F5 /* RoomScan in Frameworks */,
 				659DE31C2AF6C92C00608313 /* Resolver in Frameworks */,
 				65F8B5BE2BA5BA17006635F5 /* Core in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		65AFEB4A2BC9249D00BC1C76 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		65AFEB542BC9249D00BC1C76 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -106,7 +87,6 @@
 		659DE2DE2AF6C7B400608313 = {
 			isa = PBXGroup;
 			children = (
-				656314A12BC7090E00A3087B /* Author */,
 				65F8B5B82BA5ACE6006635F5 /* Core */,
 				65F8B5BB2BA5B9A1006635F5 /* CoreUi */,
 				65F8B5AB2BA5A95B006635F5 /* RoomScan */,
@@ -122,8 +102,6 @@
 			isa = PBXGroup;
 			children = (
 				659DE2E72AF6C7B400608313 /* RoomDecor.app */,
-				FA136FA62ECBB98E009B71B7 /* AuthorInfoTests.xctest */,
-				FA136FA72ECBB98E009B71B7 /* AuthorInfoUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -185,46 +163,11 @@
 				65F8B5B02BA5AB49006635F5 /* VirtualObject */,
 				65F8B5BD2BA5BA17006635F5 /* Core */,
 				65D900A52BA5BCFD008BE952 /* CoreUi */,
-				656314A22BC70B5700A3087B /* Author */,
 				FA136FAA2ECBBD06009B71B7 /* RoomRedesign */,
 			);
 			productName = RoomDecor;
 			productReference = 659DE2E72AF6C7B400608313 /* RoomDecor.app */;
 			productType = "com.apple.product-type.application";
-		};
-		65AFEB4C2BC9249D00BC1C76 /* AuthorInfoTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 65AFEB6A2BC9249D00BC1C76 /* Build configuration list for PBXNativeTarget "AuthorInfoTests" */;
-			buildPhases = (
-				65AFEB492BC9249D00BC1C76 /* Sources */,
-				65AFEB4A2BC9249D00BC1C76 /* Frameworks */,
-				65AFEB4B2BC9249D00BC1C76 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = AuthorInfoTests;
-			productName = AuthorInfoTests;
-			productReference = FA136FA62ECBB98E009B71B7 /* AuthorInfoTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-		65AFEB562BC9249D00BC1C76 /* AuthorInfoUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 65AFEB6B2BC9249D00BC1C76 /* Build configuration list for PBXNativeTarget "AuthorInfoUITests" */;
-			buildPhases = (
-				65AFEB532BC9249D00BC1C76 /* Sources */,
-				65AFEB542BC9249D00BC1C76 /* Frameworks */,
-				65AFEB552BC9249D00BC1C76 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = AuthorInfoUITests;
-			productName = AuthorInfoUITests;
-			productReference = FA136FA72ECBB98E009B71B7 /* AuthorInfoUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -238,14 +181,6 @@
 				TargetAttributes = {
 					659DE2E62AF6C7B400608313 = {
 						CreatedOnToolsVersion = 15.0;
-					};
-					65AFEB4C2BC9249D00BC1C76 = {
-						CreatedOnToolsVersion = 15.2;
-						TestTargetID = 65AFEB362BC9249C00BC1C76;
-					};
-					65AFEB562BC9249D00BC1C76 = {
-						CreatedOnToolsVersion = 15.2;
-						TestTargetID = 65AFEB362BC9249C00BC1C76;
 					};
 				};
 			};
@@ -270,8 +205,6 @@
 			projectRoot = "";
 			targets = (
 				659DE2E62AF6C7B400608313 /* RoomDecor */,
-				65AFEB4C2BC9249D00BC1C76 /* AuthorInfoTests */,
-				65AFEB562BC9249D00BC1C76 /* AuthorInfoUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -283,20 +216,6 @@
 			files = (
 				6552C41A2BC5ADF400E6C1AD /* Assets.xcassets in Resources */,
 				652D38572BC5AC2E001FCBC5 /* LaunchScreen.storyboard in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		65AFEB4B2BC9249D00BC1C76 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		65AFEB552BC9249D00BC1C76 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -334,20 +253,6 @@
 				FA136FA22ECB8F8E009B71B7 /* Coordinator.swift in Sources */,
 				659DE2EB2AF6C7B400608313 /* AppDelegate.swift in Sources */,
 				659DE2ED2AF6C7B400608313 /* SceneDelegate.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		65AFEB492BC9249D00BC1C76 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		65AFEB532BC9249D00BC1C76 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -537,88 +442,6 @@
 			};
 			name = Release;
 		};
-		65AFEB652BC9249D00BC1C76 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4729CGQSC7;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.antoniomarkotic.RoomDecor.AuthorInfoTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AuthorInfo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AuthorInfo";
-			};
-			name = Debug;
-		};
-		65AFEB662BC9249D00BC1C76 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4729CGQSC7;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.antoniomarkotic.RoomDecor.AuthorInfoTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AuthorInfo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AuthorInfo";
-			};
-			name = Release;
-		};
-		65AFEB672BC9249D00BC1C76 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4729CGQSC7;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.antoniomarkotic.RoomDecor.AuthorInfoUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = AuthorInfo;
-			};
-			name = Debug;
-		};
-		65AFEB682BC9249D00BC1C76 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4729CGQSC7;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.antoniomarkotic.RoomDecor.AuthorInfoUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = AuthorInfo;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -636,24 +459,6 @@
 			buildConfigurations = (
 				659DE3122AF6C7B500608313 /* Debug */,
 				659DE3132AF6C7B500608313 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		65AFEB6A2BC9249D00BC1C76 /* Build configuration list for PBXNativeTarget "AuthorInfoTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				65AFEB652BC9249D00BC1C76 /* Debug */,
-				65AFEB662BC9249D00BC1C76 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		65AFEB6B2BC9249D00BC1C76 /* Build configuration list for PBXNativeTarget "AuthorInfoUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				65AFEB672BC9249D00BC1C76 /* Debug */,
-				65AFEB682BC9249D00BC1C76 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -691,10 +496,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 65429B312AF97C40000062BB /* XCRemoteSwiftPackageReference "SnapKit" */;
 			productName = SnapKit;
-		};
-		656314A22BC70B5700A3087B /* Author */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = Author;
 		};
 		659DE31B2AF6C92C00608313 /* Resolver */ = {
 			isa = XCSwiftPackageProductDependency;

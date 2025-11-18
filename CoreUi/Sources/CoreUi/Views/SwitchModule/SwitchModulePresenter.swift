@@ -9,10 +9,6 @@ public class SwitchModulePresenter: SwitchModuleRouterProtocol {
         self.appRouter = appRouter
     }
 
-    public func authorViewTap() {
-        appRouter.authorViewTap()
-    }
-
     public func switchModule() {
         appRouter.switchModule()
     }

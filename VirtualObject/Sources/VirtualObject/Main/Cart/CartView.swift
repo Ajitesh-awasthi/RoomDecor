@@ -14,6 +14,10 @@ public struct CartView: View {
     
     public init() { }
     
+    internal init(viewModel: CartViewModel = CartViewModel()) {
+            _viewModel = StateObject(wrappedValue: viewModel)
+    }
+    
     public var body: some View {
         GeometryReader { proxy in
             ZStack {
@@ -23,7 +27,7 @@ public struct CartView: View {
                 VStack {
                     ScrollView(.vertical) {
                         if !viewModel.cartItems.isEmpty {
-                            ForEach(viewModel.cartItems, id: \.id) { item in
+                            ForEach(viewModel.cartItems, id: \.title) { item in
                                 ItemRowView(item: item)
                             }
                         } else {

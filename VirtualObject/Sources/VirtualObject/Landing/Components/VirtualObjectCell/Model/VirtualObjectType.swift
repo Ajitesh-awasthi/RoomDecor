@@ -33,14 +33,4 @@ public enum VirtualObjectType: String, CaseIterable {
             return LocalizableStrings.table.localized
         }
     }
-
-    // thumbnail image name convention: "<raw>_thumb"
-    var thumbnailImageName: String {
-        return rawValue + "_thumb"
-    }
-
-    // explicit usdz filename (adjust if your project expects different extension format)
-    var usdzFileName: String {
-        return rawValue + ".usdz"
-    }
 }
