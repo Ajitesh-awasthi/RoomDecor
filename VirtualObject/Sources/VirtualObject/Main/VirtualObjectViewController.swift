@@ -110,7 +110,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         "dessing_table_large": 1.7, "dessing_table_medium": 1.6, "dessing_table_small": 1.5,
         "lamp_large": 0.6, "lamp_medium": 0.5, "lamp_small": 0.4,
         "book_shelf_large": 2, "book_shelf_medium": 1.8, "book_shelf_small": 1.6,
-        "chair_large": 0.6, "chair_medium": 0.5, "chair_small": 0.4,
+        "chair_large": 0.9, "chair_medium": 0.7, "chair_small": 0.6,
         "pot_large": 0.4, "pot_medium": 0.3, "pot_small": 0.2,
         "table_large": 0.6, "table_medium": 0.5, "table_small": 0.4,
         "study_table_large": 0.8, "study_table_medium": 0.7, "study_table_small": 0.6
@@ -1583,6 +1583,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
             await MainActor.run {
                 self.sceneView.scene.rootNode.addChildNode(container)
                 self.selectedNode = container
+                attachPriceLabel(to: container, using: dict)
                 self.highlight(node: container, highlight: true)
 
                 self.infoView.set(title: dict["itemName"] as? String ?? "Model placed")
@@ -2113,15 +2114,6 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         setPaletteCollapsed(!paletteIsCollapsed, animated: true)
     }
 
-    private func allTypes() -> [VirtualObjectType] {
-        if let list = (VirtualObjectType.self as? (any CaseIterable.Type)) {
-            // unsafe cast to CaseIterable - better if VirtualObjectType: CaseIterable in your code
-            return (VirtualObjectType.allCases as? [VirtualObjectType]) ?? []
-        }
-        // fallback - if you have presenter-based list, call presenter API here
-        return []
-    }
-
     private func showLoading(_ show: Bool, message: String?) {
         // Use a single activity indicator attached to the top-right (near palette button) or center if not available.
         let loaderTag = 0xDEAD_BEEF
@@ -2357,7 +2349,7 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
 
     private func formatPriceLabelText(from dict: [String: Any]) -> String {
         if let p = dict["price"] as? NSNumber, let unit = dict["priceUnit"] as? String {
-            return String(format: "%.0f %@", p.doubleValue, unit)
+            return String(format: "%.2f %@", p.doubleValue, unit)
         }
         return "-"
     }
@@ -2408,62 +2400,76 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         return wrapper
     }
     
-    private func makeBillboardLabelNode(title: String, price: Double?, unit: String?, modelMaxSide: Float) -> SCNNode {
-        // Pixel layout
-        let padding: CGFloat = 8
-        // Set base pixel width relative to model size; clamp to reasonable pixel widths
-        let baseWidthPx = max(180, CGFloat(min(420, CGFloat(modelMaxSide) * 1000.0 * 0.9))) // convert meters->px heuristic
+    private func makeBillboardLabelNode(title: String, dimensions: String?, price: String?, unit: String?, modelMaxSide: Float) -> SCNNode {
+        // Pixel layout settings (kept conservative to avoid too-large textures)
+        let padding: CGFloat = 8.0
+        let baseWidthPx = max(200, min(420, CGFloat(modelMaxSide) * 1000.0 * 1.2)) // heuristic: meters->px
         let titleFont = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        let dimsFont = UIFont.systemFont(ofSize: 12, weight: .regular)
         let priceFont = UIFont.systemFont(ofSize: 13, weight: .medium)
         let textColor = UIColor.white
-        let bgColor = UIColor(white: 0.04, alpha: 0.9)
+        let bgColor = UIColor(white: 0.02, alpha: 0.9)
 
-        // Measure title (multi-line)
+        // Prepare attributed strings and measure
         let maxTextWidth = baseWidthPx - padding * 2
         let titleAttrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: textColor]
+        let dimsAttrs: [NSAttributedString.Key: Any] = [.font: dimsFont, .foregroundColor: textColor.withAlphaComponent(0.9)]
+        let priceAttrs: [NSAttributedString.Key: Any] = [.font: priceFont, .foregroundColor: textColor]
+
         let titleRect = (title as NSString).boundingRect(with: CGSize(width: maxTextWidth, height: 999),
                                                          options: [.usesLineFragmentOrigin, .usesFontLeading],
                                                          attributes: titleAttrs, context: nil)
-        var priceHeight: CGFloat = 0
-        var priceText = ""
-        if let p = price {
-            priceText = String(format: "%.0f %@", p, unit ?? "")
-            priceHeight = priceText.isEmpty ? 0 : (priceFont.lineHeight + 4)
+        var dimsRect = CGRect.zero
+        if let d = dimensions {
+            dimsRect = (d as NSString).boundingRect(with: CGSize(width: maxTextWidth, height: 999),
+                                                   options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                                   attributes: dimsAttrs, context: nil)
         }
 
-        let totalHeight = padding * 2 + ceil(titleRect.height) + priceHeight
-        let rendererSize = CGSize(width: baseWidthPx, height: totalHeight)
+        var priceText = ""
+        if let p = price, !p.isEmpty {
+            priceText = p // price already formatted by caller
+        }
+        let priceSize = (priceText as NSString).size(withAttributes: priceAttrs)
+
+        let totalHeight = padding * 2 + ceil(titleRect.height) + (dimsRect.height > 0 ? (4 + ceil(dimsRect.height)) : 0)
+        let rendererSize = CGSize(width: baseWidthPx, height: max(CGFloat(totalHeight), priceSize.height + padding * 2))
 
         UIGraphicsBeginImageContextWithOptions(rendererSize, false, 0.0)
-        guard let _ = UIGraphicsGetCurrentContext() else {
+        guard let ctx = UIGraphicsGetCurrentContext() else {
             UIGraphicsEndImageContext()
             return SCNNode()
         }
 
-        // draw background
+        // Background
         let bgPath = UIBezierPath(roundedRect: CGRect(origin: .zero, size: rendererSize), cornerRadius: 8)
         bgColor.setFill()
         bgPath.fill()
 
-        // draw title
+        // Draw title (top-left)
         let titleOrigin = CGPoint(x: padding, y: padding)
         (title as NSString).draw(in: CGRect(origin: titleOrigin, size: CGSize(width: maxTextWidth, height: ceil(titleRect.height))), withAttributes: titleAttrs)
 
-        // draw price (right aligned)
+        // Draw dims below title (left aligned)
+        if let d = dimensions, !d.isEmpty {
+            let dimsOrigin = CGPoint(x: padding, y: padding + ceil(titleRect.height) + 4)
+            (d as NSString).draw(in: CGRect(origin: dimsOrigin, size: CGSize(width: maxTextWidth, height: ceil(dimsRect.height))), withAttributes: dimsAttrs)
+        }
+
+        // Draw price (right-aligned, vertically centered relative to label)
         if !priceText.isEmpty {
-            let priceAttrs: [NSAttributedString.Key: Any] = [.font: priceFont, .foregroundColor: textColor]
-            let priceSize = (priceText as NSString).size(withAttributes: priceAttrs)
-            let priceOrigin = CGPoint(x: rendererSize.width - padding - priceSize.width, y: padding + ceil(titleRect.height))
+            let priceOrigin = CGPoint(x: rendererSize.width - padding - priceSize.width,
+                                      y: (rendererSize.height - priceSize.height) / 2.0)
             (priceText as NSString).draw(at: priceOrigin, withAttributes: priceAttrs)
         }
 
+        // Grab image and cleanup
         let rendered = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
 
-        // Create plane sized in meters relative to modelMaxSide (so it scales with model)
-        // planeWidthMeters: make it ~30% of model's max side but clamp to small range
-        let planeWidthMeters = max(0.06, Double(modelMaxSide) * 0.35)
-        let aspect = rendererSize.height / rendererSize.width
+        // Convert the pixel-based renderer into a plane sized in meters relative to the model
+        let planeWidthMeters = max(0.05, Double(modelMaxSide) * 0.35) // ~35% of model max side
+        let aspect = (rendered?.size.height ?? 1.0) / (rendered?.size.width ?? 1.0)
         let planeHeightMeters = planeWidthMeters * Double(aspect)
 
         let plane = SCNPlane(width: CGFloat(planeWidthMeters), height: CGFloat(planeHeightMeters))
@@ -2472,13 +2478,16 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         let mat = SCNMaterial()
         mat.isDoubleSided = true
         mat.lightingModel = .constant
-        mat.diffuse.contents = rendered ?? UIColor(white: 0.0, alpha: 0.85)
+        mat.diffuse.contents = rendered ?? bgColor
         plane.firstMaterial = mat
 
         let node = SCNNode(geometry: plane)
-        node.name = "priceLabel_\(UUID().uuidString)"
+        node.name = "priceLabel" // deterministic name so we can find/remove later
 
-        // billboard so it always faces camera (rotate only around Y)
+        // pivot so bottom of plane aligns with node position (so we can place top offset easily)
+        node.pivot = SCNMatrix4MakeTranslation(0, -Float(planeHeightMeters / 2.0), 0)
+
+        // Billboard so it faces camera on the Y axis
         let billboard = SCNBillboardConstraint()
         billboard.freeAxes = .Y
         node.constraints = [billboard]
@@ -2487,44 +2496,45 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
     }
 
     private func attachPriceLabel(to container: SCNNode, using dict: [String: Any]) {
-        // Avoid duplicates
+        // Avoid duplicate label
         if container.childNode(withName: "priceLabel", recursively: false) != nil {
             return
         }
 
         let itemName = dict["itemName"] as? String ?? ""
-        let price = (dict["price"] as? NSNumber)?.doubleValue
-        let priceUnit = dict["priceUnit"] as? String
+        // create a dimensions string from length/width/height if available
+        var dimsText: String? = nil
+        if let l = dict["length"] as? NSNumber, let w = dict["width"] as? NSNumber, let h = dict["height"] as? NSNumber, let unit = dict["dimUnit"] as? String {
+            dimsText = String(format: "%.0f x %.0f x %.0f %@", l.doubleValue, w.doubleValue, h.doubleValue, unit)
+        }
 
-        // compute union bounding box (in container local space)
+        let priceStr = formatPriceLabelText(from: dict)
+        // compute bounding box (in container local space)
         let (minV, maxV) = recursiveBoundingBox(for: container)
         let sizeX = maxV.x - minV.x
         let sizeY = maxV.y - minV.y
         let sizeZ = maxV.z - minV.z
         let maxSide = max(sizeX, max(sizeY, sizeZ))
-
-        // guard: if maxSide is 0 or extremely small, fallback to 0.2m
         let normalizedMaxSide = (maxSide > 0.001) ? maxSide : 0.2
 
-        // Build label node sized relative to model
-        let labelNode = makeBillboardLabelNode(title: itemName, price: price, unit: priceUnit, modelMaxSide: normalizedMaxSide)
-        // Give deterministic name for find/remove
-        labelNode.name = "priceLabel"
+        // create the label node
+        let labelNode = makeBillboardLabelNode(title: itemName, dimensions: dimsText, price: priceStr, unit: nil, modelMaxSide: normalizedMaxSide)
 
-        // Place it at container-local top center; small offset above top
-        // topY is maxV.y (already in container local coords). Clamp offsets to sane ranges (meters).
+        // place above the top center of the model
         let topY = maxV.y
-        let offsetAboveTop: Float = max(0.02, normalizedMaxSide * 0.06) // 2cm or 6% of model height
-
-        // place near top-center
         let centerX = (minV.x + maxV.x) / 2.0
         let centerZ = (minV.z + maxV.z) / 2.0
+        // offset small amount above top — proportional to model height
+        let offsetAboveTop: Float = max(0.02, normalizedMaxSide * 0.06)
+
         labelNode.position = SCNVector3(centerX, topY + offsetAboveTop, centerZ)
 
-        // attach as child so it moves with the model
+        // Attach as direct child so it moves with the model (and will rotate to face camera thanks to billboard)
         container.addChildNode(labelNode)
 
-        if enablePanDebugPrints { print("PAL: attached price label for '\(itemName)' at y=\(labelNode.position.y) (modelMaxSide=\(normalizedMaxSide))") }
+        if enablePanDebugPrints {
+            print("PAL: attached price label for '\(itemName)' at y=\(labelNode.position.y) (modelMaxSide=\(normalizedMaxSide))")
+        }
     }
 
     private func placeModelAndAttachLabel(container: SCNNode, dict: [String: Any]) {
@@ -2545,40 +2555,67 @@ public class VirtualObjectViewController: UIViewController, UIGestureRecognizerD
         }
     }
     
-    private func recursiveBoundingBox(for root: SCNNode) -> (SCNVector3, SCNVector3) {
-        var minVec = SCNVector3(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
-        var maxVec = SCNVector3(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
+    private func recursiveBoundingBox(for node: SCNNode) -> (min: SCNVector3, max: SCNVector3) {
+        // start with node's own boundingBox
+        var minVec = SCNVector3Zero
+        var maxVec = SCNVector3Zero
+        var hasBox = false
 
-        // DFS closure
-        func visit(_ node: SCNNode) {
-            // node's local bounding box (may be zero if not geometry)
-            var bmin = SCNVector3Zero
-            var bmax = SCNVector3Zero
-            if node.__getBoundingBoxMin(&bmin, max: &bmax) { // use private-ish API - safe in practice; fallback handled below
-                // convert min/max from node local to root local coordinates
-                let worldMin = node.convertPosition(bmin, to: root)
-                let worldMax = node.convertPosition(bmax, to: root)
-
-                minVec.x = min(minVec.x, worldMin.x)
-                minVec.y = min(minVec.y, worldMin.y)
-                minVec.z = min(minVec.z, worldMin.z)
-
-                maxVec.x = max(maxVec.x, worldMax.x)
-                maxVec.y = max(maxVec.y, worldMax.y)
-                maxVec.z = max(maxVec.z, worldMax.z)
-            }
-
-            // Recurse children
-            for child in node.childNodes {
-                visit(child)
+        // local function to include a box (in node-local coordinates)
+        func includeBox(min bmin: SCNVector3, max bmax: SCNVector3) {
+            if !hasBox {
+                minVec = bmin
+                maxVec = bmax
+                hasBox = true
+            } else {
+                minVec.x = Swift.min(minVec.x, bmin.x)
+                minVec.y = Swift.min(minVec.y, bmin.y)
+                minVec.z = Swift.min(minVec.z, bmin.z)
+                maxVec.x = Swift.max(maxVec.x, bmax.x)
+                maxVec.y = Swift.max(maxVec.y, bmax.y)
+                maxVec.z = Swift.max(maxVec.z, bmax.z)
             }
         }
 
-        visit(root)
+        // include this node's bounding box if it exists (some nodes may return zero-size)
+        var ownMin = SCNVector3Zero
+        var ownMax = SCNVector3Zero
+        if node.__getBoundingBoxMin(&ownMin, max: &ownMax){
+            includeBox(min: ownMin, max: ownMax)
+        }
 
-        // If nothing found (min still huge), return small zero box
-        if minVec.x > maxVec.x {
-            return (SCNVector3Zero, SCNVector3Zero)
+        // recursively include children (convert their boxes into this node's local space)
+        for child in node.childNodes {
+            let (cmin, cmax) = recursiveBoundingBox(for: child)
+            // convert child's min/max corners to this node's local coordinate space
+            let corners = [
+                SCNVector3(cmin.x, cmin.y, cmin.z),
+                SCNVector3(cmin.x, cmin.y, cmax.z),
+                SCNVector3(cmin.x, cmax.y, cmin.z),
+                SCNVector3(cmin.x, cmax.y, cmax.z),
+                SCNVector3(cmax.x, cmin.y, cmin.z),
+                SCNVector3(cmax.x, cmin.y, cmax.z),
+                SCNVector3(cmax.x, cmax.y, cmin.z),
+                SCNVector3(cmax.x, cmax.y, cmax.z)
+            ]
+            var convertedMin = SCNVector3(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
+            var convertedMax = SCNVector3(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
+            for corner in corners {
+                // convert child corner into parent (node) local coords
+                let worldCorner = child.convertPosition(corner, to: node)
+                convertedMin.x = min(convertedMin.x, worldCorner.x)
+                convertedMin.y = min(convertedMin.y, worldCorner.y)
+                convertedMin.z = min(convertedMin.z, worldCorner.z)
+                convertedMax.x = max(convertedMax.x, worldCorner.x)
+                convertedMax.y = max(convertedMax.y, worldCorner.y)
+                convertedMax.z = max(convertedMax.z, worldCorner.z)
+            }
+            includeBox(min: convertedMin, max: convertedMax)
+        }
+
+        if !hasBox {
+            // fallback very small box so things don't explode
+            return (SCNVector3(-0.1, -0.1, -0.1), SCNVector3(0.1, 0.1, 0.1))
         }
         return (minVec, maxVec)
     }
