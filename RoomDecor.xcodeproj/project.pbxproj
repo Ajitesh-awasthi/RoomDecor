@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 60;
+	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -20,8 +20,8 @@
 		65F8B5AF2BA5AB45006635F5 /* RoomScan in Frameworks */ = {isa = PBXBuildFile; productRef = 65F8B5AE2BA5AB45006635F5 /* RoomScan */; };
 		65F8B5B12BA5AB49006635F5 /* VirtualObject in Frameworks */ = {isa = PBXBuildFile; productRef = 65F8B5B02BA5AB49006635F5 /* VirtualObject */; };
 		65F8B5BE2BA5BA17006635F5 /* Core in Frameworks */ = {isa = PBXBuildFile; productRef = 65F8B5BD2BA5BA17006635F5 /* Core */; };
+		AD5537C12ECBD6CE0028F13A /* RoomRedesign in Frameworks */ = {isa = PBXBuildFile; productRef = AD5537C02ECBD6CE0028F13A /* RoomRedesign */; };
 		FA136FA22ECB8F8E009B71B7 /* Coordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA136FA12ECB8F8E009B71B7 /* Coordinator.swift */; };
-		FA136FAB2ECBBD06009B71B7 /* RoomRedesign in Frameworks */ = {isa = PBXBuildFile; productRef = FA136FAA2ECBBD06009B71B7 /* RoomRedesign */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -52,8 +52,14 @@
 		65F8B5AC2BA5AA27006635F5 /* VirtualObject */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = VirtualObject; sourceTree = "<group>"; };
 		65F8B5B82BA5ACE6006635F5 /* Core */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Core; sourceTree = "<group>"; };
 		65F8B5BB2BA5B9A1006635F5 /* CoreUi */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = CoreUi; sourceTree = "<group>"; };
+		AD5537BD2ECBD6910028F13A /* AuthorInfoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AuthorInfoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AD5537BE2ECBD6910028F13A /* AuthorInfoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AuthorInfoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AD5537BF2ECBD6B90028F13A /* RoomRedesign */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RoomRedesign; sourceTree = "<group>"; };
 		FA136FA12ECB8F8E009B71B7 /* Coordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Coordinator.swift; sourceTree = "<group>"; };
+<<<<<<< Updated upstream
 		FA136FA82ECBBACC009B71B7 /* RoomRedesign */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RoomRedesign; sourceTree = "<group>"; };
+=======
+>>>>>>> Stashed changes
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -65,7 +71,7 @@
 				65429B332AF97C40000062BB /* SnapKit in Frameworks */,
 				659DE31E2AF6C92C00608313 /* Resolver-Static in Frameworks */,
 				65D900A62BA5BCFD008BE952 /* CoreUi in Frameworks */,
-				FA136FAB2ECBBD06009B71B7 /* RoomRedesign in Frameworks */,
+				AD5537C12ECBD6CE0028F13A /* RoomRedesign in Frameworks */,
 				65F8B5AF2BA5AB45006635F5 /* RoomScan in Frameworks */,
 				659DE31C2AF6C92C00608313 /* Resolver in Frameworks */,
 				65F8B5BE2BA5BA17006635F5 /* Core in Frameworks */,
@@ -87,6 +93,11 @@
 		659DE2DE2AF6C7B400608313 = {
 			isa = PBXGroup;
 			children = (
+<<<<<<< Updated upstream
+=======
+				AD5537BF2ECBD6B90028F13A /* RoomRedesign */,
+				656314A12BC7090E00A3087B /* Author */,
+>>>>>>> Stashed changes
 				65F8B5B82BA5ACE6006635F5 /* Core */,
 				65F8B5BB2BA5B9A1006635F5 /* CoreUi */,
 				65F8B5AB2BA5A95B006635F5 /* RoomScan */,
@@ -94,7 +105,6 @@
 				65F8B5B22BA5ABAE006635F5 /* App */,
 				659DE2E82AF6C7B400608313 /* Products */,
 				65F8B5BC2BA5BA17006635F5 /* Frameworks */,
-				FA136FA82ECBBACC009B71B7 /* RoomRedesign */,
 			);
 			sourceTree = "<group>";
 		};
@@ -102,6 +112,11 @@
 			isa = PBXGroup;
 			children = (
 				659DE2E72AF6C7B400608313 /* RoomDecor.app */,
+<<<<<<< Updated upstream
+=======
+				AD5537BD2ECBD6910028F13A /* AuthorInfoTests.xctest */,
+				AD5537BE2ECBD6910028F13A /* AuthorInfoUITests.xctest */,
+>>>>>>> Stashed changes
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -163,12 +178,54 @@
 				65F8B5B02BA5AB49006635F5 /* VirtualObject */,
 				65F8B5BD2BA5BA17006635F5 /* Core */,
 				65D900A52BA5BCFD008BE952 /* CoreUi */,
+<<<<<<< Updated upstream
 				FA136FAA2ECBBD06009B71B7 /* RoomRedesign */,
+=======
+				656314A22BC70B5700A3087B /* Author */,
+				AD5537C02ECBD6CE0028F13A /* RoomRedesign */,
+>>>>>>> Stashed changes
 			);
 			productName = RoomDecor;
 			productReference = 659DE2E72AF6C7B400608313 /* RoomDecor.app */;
 			productType = "com.apple.product-type.application";
 		};
+<<<<<<< Updated upstream
+=======
+		65AFEB4C2BC9249D00BC1C76 /* AuthorInfoTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 65AFEB6A2BC9249D00BC1C76 /* Build configuration list for PBXNativeTarget "AuthorInfoTests" */;
+			buildPhases = (
+				65AFEB492BC9249D00BC1C76 /* Sources */,
+				65AFEB4A2BC9249D00BC1C76 /* Frameworks */,
+				65AFEB4B2BC9249D00BC1C76 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AuthorInfoTests;
+			productName = AuthorInfoTests;
+			productReference = AD5537BD2ECBD6910028F13A /* AuthorInfoTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		65AFEB562BC9249D00BC1C76 /* AuthorInfoUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 65AFEB6B2BC9249D00BC1C76 /* Build configuration list for PBXNativeTarget "AuthorInfoUITests" */;
+			buildPhases = (
+				65AFEB532BC9249D00BC1C76 /* Sources */,
+				65AFEB542BC9249D00BC1C76 /* Frameworks */,
+				65AFEB552BC9249D00BC1C76 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AuthorInfoUITests;
+			productName = AuthorInfoUITests;
+			productReference = AD5537BE2ECBD6910028F13A /* AuthorInfoUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+>>>>>>> Stashed changes
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -198,7 +255,6 @@
 			packageReferences = (
 				659DE31A2AF6C92C00608313 /* XCRemoteSwiftPackageReference "Resolver" */,
 				65429B312AF97C40000062BB /* XCRemoteSwiftPackageReference "SnapKit" */,
-				FA136FA92ECBBC89009B71B7 /* XCLocalSwiftPackageReference "RoomRedesign" */,
 			);
 			productRefGroup = 659DE2E82AF6C7B400608313 /* Products */;
 			projectDirPath = "";
@@ -311,7 +367,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -368,7 +424,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -386,7 +442,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/RoomDecor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 9AR3N4NDRZ;
+				DEVELOPMENT_TEAM = AB3JX6WS43;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
@@ -395,12 +451,13 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.falabella.roomDecor.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vishant.roomDecor.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -418,7 +475,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/RoomDecor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 9AR3N4NDRZ;
+				DEVELOPMENT_TEAM = AB3JX6WS43;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
@@ -427,12 +484,13 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.falabella.roomDecor.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vishant.roomDecor.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -464,13 +522,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		FA136FA92ECBBC89009B71B7 /* XCLocalSwiftPackageReference "RoomRedesign" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = RoomRedesign;
-		};
-/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		65429B312AF97C40000062BB /* XCRemoteSwiftPackageReference "SnapKit" */ = {
@@ -523,9 +574,8 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = Core;
 		};
-		FA136FAA2ECBBD06009B71B7 /* RoomRedesign */ = {
+		AD5537C02ECBD6CE0028F13A /* RoomRedesign */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = FA136FA92ECBBC89009B71B7 /* XCLocalSwiftPackageReference "RoomRedesign" */;
 			productName = RoomRedesign;
 		};
 /* End XCSwiftPackageProductDependency section */

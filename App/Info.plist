@@ -8,7 +8,11 @@
 		<false/>
 		<key>NSExceptionDomains</key>
 		<dict>
+<<<<<<< Updated upstream
 			<key>172.20.10.3</key>
+=======
+			<key>172.20.10.11</key>
+>>>>>>> Stashed changes
 			<dict>
 				<key>NSIncludesSubdomains</key>
 				<true/>

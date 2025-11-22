@@ -7,20 +7,6 @@ import UIKit
 // ============================================================================
 // PLACED FURNITURE STRUCTURE (SINGLE SOURCE OF TRUTH)
 // ============================================================================
-public func normalizeCategory(_ category: String) -> String {
-    // Handle underscore variations
-    let normalized = category.replacingOccurrences(of: "_", with: " ")
-    
-    // Map known variations
-    let mappings: [String: String] = [
-        "Office Chair": "Office Chair",
-        "Study Desk": "Study Desk",
-        "Study Table": "Study Desk",
-        "Desk": "Study Desk"
-    ]
-    
-    return mappings[normalized] ?? normalized
-}
 
 public struct PlacedFurniture: Codable {
     public let position: SIMD3<Float>
@@ -70,56 +56,20 @@ public struct PlacedFurniture: Codable {
 }
 
 // ============================================================================
-// FURNITURE ASSETS MAPPING
+// LLM PLACEMENT RESPONSE (For Gemini API)
 // ============================================================================
-public let furnitureAssets: [String: String] = [
-    "Sofa": "sofa 2",
-    "Table": "Table_Round",
-    "Lamp": "Lamp_Floor 2",
-    "Study Desk": "Study_Table 2",
-    "Office Chair": "Study_Chair 2",
-    "Bookshelf": "BookShelf 2",
-    "Bed": "Bed",
-    "Painting": "Painting",
-    "Pot": "Pot",
-    "Wall_Clock": "Wall_Clock",
-    "Wardrobe": "WardRobe",
-    "Dressing_Table": "Dressing_Table"
-]
 
-// ============================================================================
-// FURNITURE SIZING
-// ============================================================================
-public func getTargetSize(for category: String, roomBounds: MDLAxisAlignedBoundingBox? = nil) -> SIMD3<Float> {
-    switch category {
-    case "Sofa":
-        return [1.8, 1.0, 1.0]
-    case "Table":
-        return [0.8, 0.4, 0.8]
-    case "Lamp":
-        return [0.4, 1.7, 0.4]
-    case "Study Desk":
-        return [1.2, 0.75, 0.6]
-    case "Office Chair":
-        return [0.6, 1.0, 0.6]
-    case "Bookshelf":
-        return [0.8, 1.8, 0.3]
-    case "Bed":
-        return [2.0, 0.6, 1.4]
-    case "Wardrobe":
-        return [1.2, 2.0, 0.6]
-    case "Dressing_Table":
-        return [1.0, 0.8, 0.5]
-    case "Pot":
-        return [0.3, 0.4, 0.3]
-    default:
-        return [1.0, 1.0, 1.0]
-    }
+struct LLMPlacementResponse: Codable {
+    let category: String
+    let position_x: Float
+    let position_z: Float
+    let rotation_y: Float
 }
 
 // ============================================================================
 // FURNITURE NORMALIZATION
 // ============================================================================
+
 public func findFirstModelEntity(in entity: Entity) -> ModelEntity? {
     if let m = entity as? ModelEntity { return m }
     for child in entity.children {

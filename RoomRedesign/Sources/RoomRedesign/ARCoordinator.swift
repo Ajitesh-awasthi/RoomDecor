@@ -3,64 +3,12 @@ import RealityKit
 import ARKit
 import UIKit
 import ModelIO
-
-// ============================================================================
-// DOOR DETECTION SYSTEM
-// ============================================================================
-struct DoorInfo {
-    let position: SIMD2<Float>
-    let width: Float
-    let direction: SIMD2<Float>
-}
-// Helper to check if item is a wall decoration
-private func isWallItem(_ category: String) -> Bool {
-    return category == "Painting" ||
-           category == "Wall_Clock" ||
-           category == "Wall Clock"
-}
-
-
-func extractDoorLocations(from elements: [StructuralElement]) -> [DoorInfo] {
-    var doors: [DoorInfo] = []
-    
-    for element in elements {
-        if element.type == "door" || (element.id.lowercased().contains("door")) {
-            let centerX = (element.minBounds[0] + element.maxBounds[0]) / 2
-            let centerZ = (element.minBounds[2] + element.maxBounds[2]) / 2
-            let position = SIMD2<Float>(centerX, centerZ)
-            
-            let widthX = element.maxBounds[0] - element.minBounds[0]
-            let widthZ = element.maxBounds[2] - element.minBounds[2]
-            let width = max(widthX, widthZ)
-            
-            let direction: SIMD2<Float>
-            if widthX > widthZ {
-                direction = SIMD2<Float>(0, 1)
-            } else {
-                direction = SIMD2<Float>(1, 0)
-            }
-            
-            doors.append(DoorInfo(position: position, width: width, direction: direction))
-            print("🚪 Detected door at (\(centerX), \(centerZ)) with width \(width)m")
-        }
-    }
-    
-    return doors
-}
-
-func isNearDoor(position: SIMD2<Float>, doors: [DoorInfo], clearanceRadius: Float = 2.0) -> Bool {
-    for door in doors {
-        let distance = length(position - door.position)
-        if distance < clearanceRadius {
-            return true
-        }
-    }
-    return false
-}
+import Combine
 
 // ============================================================================
 // THEME SYSTEM
 // ============================================================================
+
 struct RoomTheme {
     let wallColors: [UIColor]
     let floorColor: UIColor?
@@ -69,101 +17,36 @@ struct RoomTheme {
 
 let predefinedThemes: [String: RoomTheme] = [
     "modern": RoomTheme(
-        wallColors: [
-            UIColor(red: 0.95, green: 0.95, blue: 0.95, alpha: 1.0),
-            UIColor(red: 0.85, green: 0.85, blue: 0.90, alpha: 1.0)
-        ],
+        wallColors: [UIColor(red: 0.95, green: 0.95, blue: 0.95, alpha: 1.0)],
         floorColor: UIColor(red: 0.8, green: 0.75, blue: 0.68, alpha: 1.0),
         name: "Modern"
     ),
     "warm": RoomTheme(
-        wallColors: [
-            UIColor(red: 0.98, green: 0.94, blue: 0.85, alpha: 1.0),
-            UIColor(red: 0.95, green: 0.88, blue: 0.78, alpha: 1.0)
-        ],
+        wallColors: [UIColor(red: 0.98, green: 0.94, blue: 0.85, alpha: 1.0)],
         floorColor: UIColor(red: 0.65, green: 0.45, blue: 0.30, alpha: 1.0),
         name: "Warm"
     ),
     "cool": RoomTheme(
-        wallColors: [
-            UIColor(red: 0.88, green: 0.92, blue: 0.95, alpha: 1.0),
-            UIColor(red: 0.85, green: 0.90, blue: 0.92, alpha: 1.0)
-        ],
+        wallColors: [UIColor(red: 0.88, green: 0.92, blue: 0.95, alpha: 1.0)],
         floorColor: UIColor(red: 0.7, green: 0.7, blue: 0.75, alpha: 1.0),
         name: "Cool"
-    ),
-    "natural": RoomTheme(
-        wallColors: [
-            UIColor(red: 0.93, green: 0.95, blue: 0.88, alpha: 1.0),
-            UIColor(red: 0.95, green: 0.92, blue: 0.85, alpha: 1.0)
-        ],
-        floorColor: UIColor(red: 0.55, green: 0.40, blue: 0.25, alpha: 1.0),
-        name: "Natural"
-    ),
-    "elegant": RoomTheme(
-        wallColors: [
-            UIColor(red: 0.92, green: 0.90, blue: 0.88, alpha: 1.0),
-            UIColor(red: 0.88, green: 0.85, blue: 0.82, alpha: 1.0)
-        ],
-        floorColor: UIColor(red: 0.3, green: 0.3, blue: 0.32, alpha: 1.0),
-        name: "Elegant"
     )
 ]
 
 func detectThemeFromPrompt(_ prompt: String) -> RoomTheme {
     let lowercased = prompt.lowercased()
     
-    // Modern/Minimalist/Contemporary
-    if lowercased.contains("modern") ||
-       lowercased.contains("minimalist") ||
-       lowercased.contains("contemporary") ||
-       lowercased.contains("sleek") ||
-       lowercased.contains("simple") {
-        return predefinedThemes["modern"]!
-    }
-    
-    // Warm/Cozy/Traditional
-    if lowercased.contains("warm") ||
-       lowercased.contains("cozy") ||
-       lowercased.contains("traditional") ||
-       lowercased.contains("comfortable") ||
-       lowercased.contains("inviting") {
+    if lowercased.contains("warm") || lowercased.contains("cozy") {
         return predefinedThemes["warm"]!
     }
-    
-    // Cool/Calm/Blue
-    if lowercased.contains("cool") ||
-       lowercased.contains("calm") ||
-       lowercased.contains("blue") ||
-       lowercased.contains("serene") ||
-       lowercased.contains("peaceful") {
+    if lowercased.contains("cool") || lowercased.contains("calm") {
         return predefinedThemes["cool"]!
     }
-    
-    // Natural/Green/Organic
-    if lowercased.contains("natural") ||
-       lowercased.contains("green") ||
-       lowercased.contains("organic") ||
-       lowercased.contains("earthy") ||
-       lowercased.contains("botanical") {
-        return predefinedThemes["natural"]!
-    }
-    
-    // Elegant/Luxury/Sophisticated/Aesthetic
-    if lowercased.contains("elegant") ||
-       lowercased.contains("luxury") ||
-       lowercased.contains("sophisticated") ||
-       lowercased.contains("aesthetic") ||
-       lowercased.contains("beautiful") ||
-       lowercased.contains("classy") ||
-       lowercased.contains("refined") {
-        return predefinedThemes["elegant"]!
-    }
-    
     return predefinedThemes["modern"]!
 }
+
 func applyThemeToRoom(roomEntity: Entity, theme: RoomTheme) {
-    print("🎨 Applying \(theme.name) theme to room (floor only)...")
+    print("🎨 Applying \(theme.name) theme to room...")
     
     func applyThemeRecursive(entity: Entity) {
         let name = entity.name.lowercased()
@@ -172,8 +55,6 @@ func applyThemeToRoom(roomEntity: Entity, theme: RoomTheme) {
             var material = SimpleMaterial()
             material.baseColor = .color(floorColor)
             material.roughness = 0.8
-            material.metallic = 0.0
-            
             modelEntity.model?.materials = [material]
             print("  🖌️ Floor → \(theme.name) floor color")
         }
@@ -195,7 +76,8 @@ class ARCoordinator: NSObject, ObservableObject {
     var furnitureAnchor = Entity()
     var roomBounds: MDLAxisAlignedBoundingBox?
     var structuralElements: [StructuralElement] = []
-    var doorLocations: [DoorInfo] = []
+    var selectedEntity: Entity? = nil
+    private var dragStartPosition: SIMD3<Float>? = nil
     
     var showBoundaryWarningBinding: Binding<Bool>?
     var boundaryWarningMessageBinding: Binding<String>?
@@ -206,228 +88,654 @@ class ARCoordinator: NSObject, ObservableObject {
     @Published var selectedFurniture: String? = nil
     @Published var furnitureCart: [String: Int] = [:]
     @Published var totalPrice: Float = 0.0
+    @Published var availableFurniture: [FurnitureItem] = []
+    @Published var isLoadingFurniture: Bool = false
+    @Published var furnitureWithMetadata: [PlacedFurnitureWithMetadata] = []
+    @Published var downloadProgress: [String: Double] = [:]
+    @Published var totalFurnitureToLoad: Int = 0
+    @Published var furnitureLoaded: Int = 0
     
-    // ✅ FIX 2: ADD THIS PROPERTY TO PREVENT MULTIPLE ADDS
     private var isPlacingFurniture = false
-
+    private var furnitureByCategory: [String: [FurnitureItem]] = [:]
+    
+    // ============================================================================
+    // ROOM LOADING
+    // ============================================================================
+    
     func loadRoomBounds(from url: URL) {
-        guard roomBounds == nil else { return } // No need to reload if already done
-
-        // --- THIS IS THE FIX ---
+        guard roomBounds == nil else { return }
+        
         guard let roomEntity = try? Entity.load(contentsOf: url) else {
             self.sceneLoadError = "Failed to load room from URL."
             return
         }
-        // -----------------------
-
+        
         let analysis = processLoadedRoom(entity: roomEntity)
         self.roomBounds = analysis.overallBounds.toMDLAxisAlignedBoundingBox()
         self.structuralElements = analysis.elements
-        self.doorLocations = extractDoorLocations(from: analysis.elements)
         print("✅ Room bounds and \(analysis.elements.count) structural elements loaded.")
     }
-
+    
     func findDraggableParent(from entity: Entity) -> Entity? {
         if entity.name.starts(with: "FURN_") {
             return entity
         }
-        guard let parent = entity.parent else { return nil }
-        return findDraggableParent(from: parent)
+        if let parent = entity.parent {
+            return findDraggableParent(from: parent)
+        }
+        return nil
     }
     
-    func placeFurnitureList(_ list: [PlacedFurniture], in anchor: Entity, isPreview: Bool = false) { // <-- ADD THIS
-        anchor.children.removeAll()
-            for item in list {
-                // Pass 'isPreview' to the next function
-                placeFurniture(name: item.category, position: item.position, rotation: item.rotation, in: anchor, isPreview: isPreview)
-            }
-    }
-
-    func placeFurniture(name: String, position: SIMD3<Float>, rotation: Float,
-                           in anchor: Entity, isPreview: Bool = false) {
-        let position2D = SIMD2<Float>(position.x, position.z)
+    func reloadFurnitureInPreview(_ layout: [PlacedFurniture], in anchor: Entity) {
+        print("\n🔄 Reloading furniture in preview...")
         
-        if let polygon = getFloorPolygon() {
-            if !isPointInPolygonWithMargin(point: position2D, polygon: polygon, margin: 0.5) {
-                showBoundaryWarning(message: "⚠️ Cannot place outside room boundaries!")
+        anchor.children.forEach { child in
+            if child.name.starts(with: "FURN_") {
+                child.removeFromParent()
+            }
+        }
+        
+        placeFurnitureList(layout, in: anchor, isPreview: true)
+        
+        print("✅ Preview reloaded with \(layout.count) items")
+    }
+    
+    // MARK: - Sync Layout from AR
+    func syncLayoutFromAR(_ layout: [PlacedFurniture]) {
+        print("\n🔄 Syncing layout from AR...")
+        
+        let layoutWithMetadata = matchLayoutWithFurniture(
+            layout: layout,
+            furnitureItems: availableFurniture
+        )
+        
+        self.furnitureWithMetadata = layoutWithMetadata
+        updateCartFromLayout(layoutWithMetadata)
+        
+        print("✅ Sync complete: \(layoutWithMetadata.count) items, $\(String(format: "%.2f", totalPrice))")
+    }
+    
+    // ============================================================================
+    // GESTURE HANDLERS
+    // ============================================================================
+    
+    func setupARGestures(for arView: ARView) {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        arView.addGestureRecognizer(tapGesture)
+        
+        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        arView.addGestureRecognizer(panGesture)
+        
+        let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        longPressGesture.minimumPressDuration = 0.5
+        arView.addGestureRecognizer(longPressGesture)
+        
+        print("✅ AR gestures configured")
+    }
+    
+    @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard let arView = arView else { return }
+        
+        let location = gesture.location(in: arView)
+        
+        // Remove previous selection highlight
+        if let selected = selectedEntity {
+            removeHighlight(from: selected)
+        }
+        
+        // Check if we tapped on furniture
+        if let entity = arView.entity(at: location) {
+            if let furniture = findDraggableParent(from: entity) {
+                selectedEntity = furniture
+                addHighlight(to: furniture)
+                
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
+                
+                print("✅ Selected: \(furniture.name)")
+                return
+            }
+        }
+        
+        // If we get here, we didn't tap furniture
+        selectedEntity = nil
+        print("ℹ️ Deselected")
+    }
+    
+    @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard let arView = arView,
+              let selected = selectedEntity else { return }
+        
+        let location = gesture.location(in: arView)
+        
+        switch gesture.state {
+        case .began:
+            dragStartPosition = selected.position
+            print("🎯 Started dragging: \(selected.name)")
+            
+        case .changed:
+            let results = arView.raycast(from: location, allowing: .existingPlaneGeometry, alignment: .horizontal)
+            
+            guard let result = results.first else { return }
+            
+            let newPosition = result.worldTransform.columns.3
+            let pos2D = SIMD2<Float>(newPosition.x, newPosition.z)
+            
+            // Check if within room boundaries
+            if let floorElement = structuralElements.first(where: { $0.type == "floor" }),
+               let polygonData = floorElement.polygon {
+                let polygon = polygonData.map { SIMD2<Float>($0[0], $0[1]) }
+                
+                if isPointInPolygonWithMargin(point: pos2D, polygon: polygon, margin: 0.3) {
+                    // Valid position - update furniture location
+                    selected.position = SIMD3<Float>(newPosition.x, selected.position.y, newPosition.z)
+                } else {
+                    // Outside boundaries - show warning
+                    showBoundaryWarningBinding?.wrappedValue = true
+                    boundaryWarningMessageBinding?.wrappedValue = "⚠️ Cannot place furniture outside room boundaries"
+                    
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.warning)
+                }
+            }
+            
+        case .ended, .cancelled:
+            dragStartPosition = nil
+            print("✅ Finished dragging: \(selected.name)")
+            
+        default:
+            break
+        }
+    }
+    
+    @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began,
+              let arView = arView else { return }
+        
+        let location = gesture.location(in: arView)
+        
+        if let entity = arView.entity(at: location),
+           let furniture = findDraggableParent(from: entity) {
+            
+            // Trigger delete confirmation
+            furnitureToDeleteBinding?.wrappedValue = furniture
+            showDeleteConfirmationBinding?.wrappedValue = true
+            
+            let generator = UIImpactFeedbackGenerator(style: .heavy)
+            generator.impactOccurred()
+            
+            print("🗑️ Long press detected on: \(furniture.name)")
+        }
+    }
+    
+    private func addHighlight(to entity: Entity) {
+        entity.scale *= 1.1
+    }
+    
+    private func removeHighlight(from entity: Entity) {
+        entity.scale /= 1.1
+    }
+    
+    // ============================================================================
+    // DELETE FURNITURE
+    // ============================================================================
+    
+    func deleteFurniture(_ furniture: Entity) {
+        print("🗑️ Deleting \(furniture.name)")
+        
+        // Extract category from furniture name (format: "FURN_0_ItemName")
+        if let category = extractCategoryFromFurnitureName(furniture.name) {
+            removeItemFromCart(category: category)
+        }
+        
+        furniture.removeFromParent()
+        
+        // Clear selection if this was the selected entity
+        if selectedEntity == furniture {
+            selectedEntity = nil
+        }
+    }
+    
+    private func extractCategoryFromFurnitureName(_ name: String) -> String? {
+        // Name format: "FURN_0_Modern_Sofa_Set" or "FURN_0_ItemName"
+        let components = name.components(separatedBy: "_")
+        
+        if components.count >= 3 {
+            // Reconstruct the item name from components after "FURN" and index
+            let itemNameParts = components.dropFirst(2)
+            
+            // Try to find matching furniture in our metadata
+            if let matchingFurniture = furnitureWithMetadata.first(where: {
+                $0.metadata.itemName.replacingOccurrences(of: " ", with: "_") == itemNameParts.joined(separator: "_")
+            }) {
+                return matchingFurniture.metadata.category
+            }
+        }
+        
+        return nil
+    }
+    
+    // ============================================================================
+    // MAIN ENTRY POINT: Generate Design with Search (FIXED)
+    // ============================================================================
+    
+    func generateDesignWithSearch(_ prompt: String, from url: URL, completion: @escaping ([PlacedFurniture]?) -> Void) {
+        print("\n" + String(repeating: "=", count: 80))
+        print("🎨 STARTING DESIGN GENERATION")
+        print("   Prompt: '\(prompt)'")
+        print(String(repeating: "=", count: 80) + "\n")
+        
+        Task { @MainActor in
+            // STEP 1: Call LLM Search API to get furniture
+            print("📞 STEP 1: Calling LLM Search API...")
+            guard let searchData = await callSearchAPI(macIP: getMacIP(), prompt: prompt) else {
+                print("❌ LLM search API failed")
+                completion(nil)
                 return
             }
             
-            if isNearDoor(position: position2D, doors: doorLocations, clearanceRadius: 1.2) {
-                showBoundaryWarning(message: "⚠️ Cannot place near doorway!")
-                return
+            // DEBUG: Print Raw JSON
+            if let jsonString = String(data: searchData, encoding: .utf8) {
+                print("🔍 RAW JSON: \(jsonString)")
             }
-        }
-        
-        guard let modelName = furnitureAssets[name] else {
-            print("Error: '\(name)' not in asset catalog.")
-            return
-        }
-        
-        do {
-            let entity = try Entity.load(named: modelName, in: Bundle.module)
-            let targetSize = getTargetSize(for: name, roomBounds: roomBounds)
-            let normalized = normalizeFurniture(entity, targetSize: targetSize)
             
-            entity.scale = normalized.scale
-            entity.position = normalized.position
-            
-            let placedEntity = ModelEntity()
-            placedEntity.addChild(entity)
-            placedEntity.name = "FURN_\(name)_\(UUID().uuidString.prefix(4))"
-            
-            // ✅ DETERMINE Y POSITION AND ROTATION BASED ON MODE AND ITEM TYPE
-            let yPosition: Float
-            let finalRotation: simd_quatf
-            
-            if isPreview {
-                // ============================================================
-                // PREVIEW MODE: Use position from layout data (already correct)
-                // ============================================================
-                yPosition = position.y
-                finalRotation = simd_quatf(angle: rotation * .pi / 180.0, axis: [0,1,0])
-                print("📺 Preview: \(name) at Y=\(position.y)")
+            do {
+                let decoder = JSONDecoder()
+                // decoder.keyDecodingStrategy = .convertFromSnakeCase // Use if needed
                 
-            } else {
-                // ============================================================
-                // AR MODE: Calculate position based on room scan + metadata
-                // ============================================================
-                let floorHeight = getFloorHeight()
+                // STEP 2: Parse furniture response
+                // NOTE: Ensure FurnitureSearchResponse is available in your project
+                let furnitureResponse = try decoder.decode(FurnitureSearchResponse.self, from: searchData)
                 
-                if isWallItem(name) {
-                    print("🎨 Detected wall item: \(name)")
-                       
-                       if let metadata = furnitureMetadata[name] {
-                           yPosition = floorHeight + metadata.heightOffset
-                           print("🖼️ AR Wall item: \(name) at Y=\(yPosition) (floor: \(floorHeight) + offset: \(metadata.heightOffset))")
-                           
-                           let yRotation = simd_quatf(angle: rotation * .pi / 180.0, axis: [0,1,0])
-                           
-                           if name == "Wall_Clock" || name == "Wall Clock" {
-                               // Clock needs to stand upright
-                               let xRotation = simd_quatf(angle: .pi / 2, axis: [1,0,0])
-                               finalRotation = yRotation * xRotation
-                               print("  🕐 Clock: Applied X-axis rotation")
-                           } else if name == "Painting" {
-                               finalRotation = yRotation
-                               print("  🖼️ Painting: Standard rotation")
-                           } else {
-                               finalRotation = yRotation
-                           }
-                       } else {
-                           print("⚠️ No metadata for wall item: \(name)")
-                           yPosition = floorHeight + 1.5
-                           finalRotation = simd_quatf(angle: rotation * .pi / 180.0, axis: [0,1,0])
-                       }
-                   } else {
-                       // Floor items
-                       yPosition = floorHeight + 0.01
-                       finalRotation = simd_quatf(angle: rotation * .pi / 180.0, axis: [0,1,0])
-                       print("🪑 AR Floor item: \(name) at Y=\(yPosition)")
-                   }
-            }
-            
-            // ✅ APPLY FINAL POSITION AND ROTATION
-            placedEntity.position = SIMD3<Float>(
-                position.x,
-                yPosition,
-                position.z
-            )
-            
-            placedEntity.transform.rotation = finalRotation
-            placedEntity.generateCollisionShapes(recursive: true)
-            
-            anchor.addChild(placedEntity)
-            print("✅ Placed: \(placedEntity.name) at Y=\(yPosition)")
-            
-        } catch {
-            print("Failed to load model \(modelName): \(error)")
-            DispatchQueue.main.async {
-                self.sceneLoadError = "Failed to load \(modelName)"
-            }
-        }
-    }
-
-    // ============================================================
-    // HELPER FUNCTION: Add this if you don't have it already
-    // ============================================================
-    private func isWallItem(_ category: String) -> Bool {
-        return category == "Painting" ||
-               category == "Wall_Clock" ||
-               category == "Wall Clock"
-    }
-
-    func getCurrentLayout() -> [PlacedFurniture] {
-        var currentLayout: [PlacedFurniture] = []
-        
-        for entity in furnitureAnchor.children {
-            guard entity.name.starts(with: "FURN_"), let modelEntity = entity as? ModelEntity else {
-                continue
-            }
-            
-            let fullName = entity.name
-            guard let firstUnderscore = fullName.firstIndex(of: "_"),
-                  let lastUnderscore = fullName.lastIndex(of: "_"),
-                  firstUnderscore != lastUnderscore
-            else {
-                print("Warning: Could not parse category from name: \(fullName)")
-                continue
-            }
-            
-            let categoryStartIndex = fullName.index(after: firstUnderscore)
-            let category = String(fullName[categoryStartIndex..<lastUnderscore])
-            let position = modelEntity.position
-            let rotationAngle = modelEntity.transform.rotation.angle * (180.0 / .pi)
-            
-            currentLayout.append(
-                PlacedFurniture(
-                    position: position,
-                    rotation: rotationAngle,
-                    category: category
+                // ✅ NULL CHECK: If no furniture returned, don't proceed
+                guard !furnitureResponse.results.isEmpty else {
+                    print("⚠️ LLM returned 0 furniture items - cannot proceed")
+                    print("💡 Try a different prompt or check your search API")
+                    completion(nil)
+                    return
+                }
+                
+                print("✅ LLM returned \(furnitureResponse.results.count) furniture items")
+                for item in furnitureResponse.results.prefix(5) {
+                    print("   - \(item.itemName) (\(item.category), $\(item.price))")
+                }
+                if furnitureResponse.results.count > 5 {
+                    print("   ... and \(furnitureResponse.results.count - 5) more")
+                }
+                
+                // ===============================================================
+                // 🚀 LOGIC MOVED INSIDE DO-BLOCK TO FIX SCOPE ERROR
+                // ===============================================================
+                
+                // STEP 3: Store furniture data
+                print("\n💾 STEP 3: Storing furniture data...")
+                self.availableFurniture = furnitureResponse.results
+                self.furnitureByCategory = Dictionary(grouping: furnitureResponse.results) { $0.category }
+                print("✅ Stored \(self.furnitureByCategory.keys.count) unique categories")
+                
+                // STEP 4: Call Gemini to place furniture
+                print("\n🤖 STEP 4: Calling Gemini for placement...")
+                guard let placementLayout = await callGeminiForPlacement(
+                    furnitureItems: furnitureResponse.results,
+                    prompt: prompt,
+                    roomURL: url
+                ) else {
+                    print("❌ Gemini placement failed")
+                    completion(nil)
+                    return
+                }
+                
+                // STEP 5: Match placements with furniture metadata
+                print("\n🔗 STEP 5: Matching placements with furniture metadata...")
+                let layoutWithMetadata = matchLayoutWithFurniture(
+                    layout: placementLayout,
+                    furnitureItems: furnitureResponse.results
                 )
-            )
+                
+                self.furnitureWithMetadata = layoutWithMetadata
+                print("✅ Matched \(layoutWithMetadata.count) items")
+                
+                // STEP 6: Update cart
+                print("\n🛒 STEP 6: Updating shopping cart...")
+                updateCartFromLayout(layoutWithMetadata)
+                
+                print("\n" + String(repeating: "=", count: 80))
+                print("✅ DESIGN GENERATION COMPLETE")
+                print("   Total items: \(placementLayout.count)")
+                print("   Total price: $\(String(format: "%.2f", self.totalPrice))")
+                print(String(repeating: "=", count: 80) + "\n")
+                
+                completion(placementLayout)
+                
+            } catch let DecodingError.dataCorrupted(context) {
+                print("❌ Data corrupted: \(context)")
+                completion(nil)
+            } catch let DecodingError.keyNotFound(key, context) {
+                print("❌ Key '\(key)' not found: \(context.debugDescription)")
+                print("   (Check if your backend JSON key matches the Swift struct property)")
+                completion(nil)
+            } catch let DecodingError.valueNotFound(value, context) {
+                print("❌ Value '\(value)' not found: \(context.debugDescription)")
+                completion(nil)
+            } catch let DecodingError.typeMismatch(type, context) {
+                print("❌ Type mismatch: \(type), \(context.debugDescription)")
+                print("   (Did the backend send a String where you expected a Float?)")
+                completion(nil)
+            } catch {
+                print("❌ Unknown error: \(error)")
+                completion(nil)
+            }
         }
-        
-        print("✅ Fetched current layout with \(currentLayout.count) items.")
-        return currentLayout
     }
-
-    private func parseCategory(from name: String) -> String? {
-        guard name.starts(with: "FURN_"),
-              let firstUnderscore = name.firstIndex(of: "_"),
-              let lastUnderscore = name.lastIndex(of: "_"),
-              firstUnderscore != lastUnderscore
-        else {
-            print("Warning: Could not parse category from name: \(name)")
+    
+    // ============================================================================
+    // CALL GEMINI FOR PLACEMENT
+    // ============================================================================
+    
+    private func callGeminiForPlacement(
+        furnitureItems: [FurnitureItem],
+        prompt: String,
+        roomURL: URL
+    ) async -> [PlacedFurniture]? {
+        
+        // Load room to get floor polygon
+        guard let roomEntity = try? Entity.load(contentsOf: roomURL) else {
+            print("❌ Failed to load room for placement")
             return nil
         }
         
-        let categoryStartIndex = name.index(after: firstUnderscore)
-        return String(name[categoryStartIndex..<lastUnderscore])
-    }
+        let analysis = processLoadedRoom(entity: roomEntity)
         
-    func updateTotalPrice() {
-        var total: Float = 0.0
-        for (category, count) in furnitureCart {
-            let pricePerItem = furnitureMetadata[category]?.price ?? 0.0
-            total += pricePerItem * Float(count)
+        guard let floorElement = analysis.elements.first(where: { $0.type == "floor" }),
+              let polygonData = floorElement.polygon else {
+            print("❌ No floor polygon found")
+            return nil
         }
         
-        DispatchQueue.main.async {
-            self.totalPrice = total
-            print("💰 Total price updated: \(total)")
+        let polygon = polygonData.map { SIMD2<Float>($0[0], $0[1]) }
+        let bounds = getPolygonBounds(polygon: polygon)
+        let floorHeight = floorElement.minBounds[1]
+        
+        print("📐 Room constraints:")
+        print("   Floor height: \(floorHeight)m")
+        print("   Bounds: X[\(bounds.min.x), \(bounds.max.x)], Z[\(bounds.min.y), \(bounds.max.y)]")
+        print("   Polygon vertices: \(polygon.count)")
+        
+        // Build Gemini prompt
+        let geminiPrompt = buildGeminiPlacementPrompt(
+            furnitureItems: furnitureItems,
+            userPrompt: prompt,
+            bounds: bounds,
+            floorHeight: floorHeight,
+            polygon: polygon
+        )
+        
+        // Call Gemini API
+        guard let placementData = await callGeminiAPI(prompt: geminiPrompt) else {
+            print("❌ Gemini API call failed")
+            return nil
+        }
+        
+        // Parse response
+        guard let layout = parseGeminiPlacementResponse(placementData, furnitureItems: furnitureItems) else {
+            print("❌ Failed to parse Gemini response")
+            return nil
+        }
+        
+        print("✅ Gemini returned \(layout.count) placements")
+        
+        // Validate and process layout
+        let dimensionsMap = buildDimensionsMap(furnitureItems: furnitureItems, layout: layout)
+        
+        var processedLayout = validateAndFixLayout(
+            layout: layout,
+            polygon: polygon,
+            margin: 0.4
+        )
+        
+        processedLayout = removeOverlappingFurnitureWithDimensions(
+            layout: processedLayout,
+            minDistance: 0.2,
+            dimensionsMap: dimensionsMap
+        )
+        
+        print("✅ Final validated layout: \(processedLayout.count) items")
+        
+        return processedLayout
+    }
+    
+    private func buildGeminiPlacementPrompt(
+        furnitureItems: [FurnitureItem],
+        userPrompt: String,
+        bounds: (min: SIMD2<Float>, max: SIMD2<Float>),
+        floorHeight: Float,
+        polygon: [SIMD2<Float>]
+    ) -> String {
+        
+        var prompt = """
+        You are an interior design AI. Place furniture in a room based on these constraints:
+        
+        USER REQUEST: "\(userPrompt)"
+        
+        ROOM CONSTRAINTS:
+        - Floor height: \(floorHeight) meters
+        - X bounds: [\(bounds.min.x), \(bounds.max.x)] meters
+        - Z bounds: [\(bounds.min.y), \(bounds.max.y)] meters
+        - CRITICAL: All furniture MUST be placed within these bounds with 0.4m margin from walls
+        
+        AVAILABLE FURNITURE:
+        """
+        
+        for (index, item) in furnitureItems.enumerated() {
+            let dims = item.dimensionsInMeters
+            prompt += "\n\(index + 1). \(item.itemName)"
+            prompt += "\n   - Category: \(item.category)"
+            prompt += "\n   - Size: \(dims.x)m x \(dims.y)m x \(dims.z)m (W x H x D)"
+            prompt += "\n   - Price: $\(item.price)"
+        }
+        
+        prompt += """
+        
+        
+        PLACEMENT RULES:
+        1. ALL positions must be within bounds: X[\(bounds.min.x + 0.4), \(bounds.max.x - 0.4)], Z[\(bounds.min.y + 0.4), \(bounds.max.y - 0.4)]
+        2. Leave 0.3-0.5m spacing between furniture
+        3. Large furniture (beds, sofas) against walls
+        4. Leave pathways for movement
+        5. Consider natural groupings (dining set, living area, etc.)
+        
+        OUTPUT FORMAT (JSON array):
+        [
+          {
+            "category": "<exact category name>",
+            "position_x": <x coordinate>,
+            "position_y": \(floorHeight),
+            "position_z": <z coordinate>,
+            "rotation_y": <rotation in degrees 0-360>
+          }
+        ]
+        
+        Return ONLY the JSON array, no other text.
+        """
+        
+        return prompt
+    }
+    
+    private func parseGeminiPlacementResponse(_ data: Data, furnitureItems: [FurnitureItem]) -> [PlacedFurniture]? {
+        // Try to extract JSON from response
+        guard let responseString = String(data: data, encoding: .utf8) else {
+            print("❌ Could not decode response as UTF-8")
+            return nil
+        }
+        
+        // Remove markdown code blocks if present
+        var jsonString = responseString
+            .replacingOccurrences(of: "```json\n", with: "")
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "\n```", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Try to find JSON array
+        if let startIndex = jsonString.firstIndex(of: "["),
+           let endIndex = jsonString.lastIndex(of: "]") {
+            jsonString = String(jsonString[startIndex...endIndex])
+        }
+        
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            print("❌ Could not convert cleaned response to data")
+            return nil
+        }
+        
+        do {
+            let layout = try JSONDecoder().decode([PlacedFurniture].self, from: jsonData)
+            print("✅ Parsed \(layout.count) furniture placements")
+            return layout
+        } catch {
+            print("❌ JSON parsing error: \(error)")
+            print("Response excerpt: \(jsonString.prefix(500))")
+            return nil
         }
     }
     
-    func addItemToCart(category: String) {
-        DispatchQueue.main.async {
-            self.furnitureCart[category, default: 0] += 1
-            print("🛒 Cart Add: \(category). New count: \(self.furnitureCart[category] ?? 0)")
-            self.updateTotalPrice()
+    // ============================================================================
+    // COLLISION DETECTION WITH DIMENSIONS
+    // ============================================================================
+    
+    private func removeOverlappingFurnitureWithDimensions(
+        layout: [PlacedFurniture],
+        minDistance: Float,
+        dimensionsMap: [String: SIMD3<Float>]
+    ) -> [PlacedFurniture] {
+        
+        print("\n🔍 Checking for overlapping furniture...")
+        
+        var validItems: [PlacedFurniture] = []
+        var removedItems: [String] = []
+        
+        for item in layout {
+            let dimensions = dimensionsMap[item.category] ?? SIMD3<Float>(1.0, 1.0, 1.0)
+            var hasOverlap = false
+            
+            // Check for small items that can be closer together
+            let isSmallItem = item.category.lowercased().contains("lamp") ||
+                            item.category.lowercased().contains("pot") ||
+                            item.category.lowercased().contains("plant")
+            
+            let baseMinDistance: Float = isSmallItem ? 0.2 : minDistance
+            
+            for existing in validItems {
+                let existingDimensions = dimensionsMap[existing.category] ?? SIMD3<Float>(1.0, 1.0, 1.0)
+                
+                let isExistingSmall = existing.category.lowercased().contains("lamp") ||
+                                     existing.category.lowercased().contains("pot") ||
+                                     existing.category.lowercased().contains("plant")
+                
+                // Use smaller distance if both are small items
+                let minDist = (isSmallItem && isExistingSmall) ? 0.15 : baseMinDistance
+                
+                let newBounds = getBounds2D(for: item, dimensions: dimensions)
+                let existingBounds = getBounds2D(for: existing, dimensions: existingDimensions)
+                
+                if checkOverlap(bounds1: newBounds, bounds2: existingBounds, minDistance: minDist) {
+                    print("  ❌ \(item.category) overlaps with \(existing.category)")
+                    hasOverlap = true
+                    break
+                }
+            }
+            
+            if hasOverlap {
+                print("  🗑️ Removing overlapping \(item.category)")
+                removedItems.append(item.category)
+            } else {
+                validItems.append(item)
+                print("  ✅ \(item.category) is valid (no overlaps)")
+            }
+        }
+        
+        if !removedItems.isEmpty {
+            print("\n⚠️ Removed \(removedItems.count) overlapping items: \(removedItems.joined(separator: ", "))")
+        } else {
+            print("\n✅ No overlaps detected!")
+        }
+        
+        return validItems
+    }
+    
+    // ============================================================================
+    // HELPER FUNCTIONS
+    // ============================================================================
+    
+    private func buildDimensionsMap(furnitureItems: [FurnitureItem], layout: [PlacedFurniture]) -> [String: SIMD3<Float>] {
+        var dimensionsMap: [String: SIMD3<Float>] = [:]
+        
+        for item in layout {
+            if let furnitureData = furnitureItems.first(where: { matchCategory($0.category, item.category) }) {
+                dimensionsMap[item.category] = furnitureData.dimensionsInMeters
+            }
+        }
+        
+        return dimensionsMap
+    }
+    
+    private func matchLayoutWithFurniture(
+        layout: [PlacedFurniture],
+        furnitureItems: [FurnitureItem]
+    ) -> [PlacedFurnitureWithMetadata] {
+        
+        return layout.compactMap { placement in
+            if let furniture = furnitureItems.first(where: { matchCategory($0.category, placement.category) }) {
+                print("   ✅ Matched \(placement.category) → \(furniture.itemName)")
+                return PlacedFurnitureWithMetadata(
+                    placement: placement,
+                    metadata: furniture
+                )
+            } else {
+                print("   ⚠️ No furniture data found for \(placement.category)")
+                return nil
+            }
         }
     }
     
-    func removeItemFromCart(category: String) {
+    func matchCategory(_ apiCategory: String, _ placementCategory: String) -> Bool {
+        let normalized1 = apiCategory.lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        
+        let normalized2 = placementCategory.lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        
+        let words1 = Set(normalized1.split(separator: " ").map(String.init))
+        let words2 = Set(normalized2.split(separator: " ").map(String.init))
+        
+        let commonWords = words1.intersection(words2)
+        
+        return !commonWords.isEmpty ||
+            normalized1.contains(normalized2) ||
+            normalized2.contains(normalized1)
+    }
+    
+    private func updateCartFromLayout(_ layout: [PlacedFurnitureWithMetadata]) {
+        var newCart: [String: Int] = [:]
+        var newTotal: Float = 0.0
+        
+        for item in layout {
+            let category = item.metadata.category
+            newCart[category, default: 0] += 1
+            newTotal += item.metadata.price
+        }
+        
+        DispatchQueue.main.async {
+            self.furnitureCart = newCart
+            self.totalPrice = newTotal
+            print("💰 Cart updated: \(newCart.count) categories, $\(String(format: "%.2f", newTotal))")
+        }
+    }
+    
+    private func removeItemFromCart(category: String) {
         DispatchQueue.main.async {
             guard var currentCount = self.furnitureCart[category] else {
                 print("🛒 Cart Remove Error: Tried to remove \(category) but it's not in the cart.")
@@ -442,849 +750,251 @@ class ARCoordinator: NSObject, ObservableObject {
                 self.furnitureCart[category] = currentCount
                 print("🛒 Cart Remove: \(category). New count: \(currentCount)")
             }
+            
             self.updateTotalPrice()
         }
     }
     
-    func deleteFurniture(_ furniture: Entity) {
-        print("🗑️ Deleting \(furniture.name)")
-        
-        if let category = self.parseCategory(from: furniture.name) {
-            self.removeItemFromCart(category: category)
+    private func updateTotalPrice() {
+        var total: Float = 0.0
+        for item in furnitureWithMetadata {
+            let category = item.metadata.category
+            let count = Float(furnitureCart[category] ?? 0)
+            total += item.metadata.price * count
         }
-        
-        furniture.removeFromParent()
+        totalPrice = total
     }
     
-    @objc func handleLongPress(_ sender: UILongPressGestureRecognizer) {
-        guard let arView = arView else { return }
-        guard sender.state == .began else { return }
+    // ============================================================================
+    // PLACE FURNITURE IN SCENE
+    // ============================================================================
+    
+    func placeFurnitureList(_ layout: [PlacedFurniture], in anchor: Entity, isPreview: Bool) {
+        print("\n🏗️ Placing \(layout.count) furniture items in \(isPreview ? "preview" : "AR") mode...")
         
-        let location = sender.location(in: arView)
-        guard let entity = arView.entity(at: location) else { return }
+        totalFurnitureToLoad = layout.count
+        furnitureLoaded = 0
         
-        guard let furniture = findDraggableParent(from: entity) else { return }
-        
-        print("📍 Long press detected on \(furniture.name)")
-        
-        DispatchQueue.main.async {
-            self.furnitureToDeleteBinding?.wrappedValue = furniture
-            self.showDeleteConfirmationBinding?.wrappedValue = true
+        // Remove existing furniture
+        anchor.children.forEach { child in
+            if child.name.starts(with: "FURN_") {
+                child.removeFromParent()
+            }
         }
+        
+        // Place each item
+        for (index, item) in layout.enumerated() {
+            placeSingleFurnitureItem(
+                item: item,
+                in: anchor,
+                index: index,
+                isPreview: isPreview
+            )
+        }
+        
+        print("✅ All furniture placement initiated")
     }
     
-    @objc func handleTap(_ sender: UITapGestureRecognizer) {
-        guard let arView = arView else { return }
+    private func placeSingleFurnitureItem(
+        item: PlacedFurniture,
+        in anchor: Entity,
+        index: Int,
+        isPreview: Bool
+    ) {
+        // Find matching furniture data
+        guard let furnitureData = availableFurniture.first(where: { matchCategory($0.category, item.category) }) else {
+            print("   ⚠️ No furniture data for \(item.category)")
+            return
+        }
         
-        guard !isPlacingFurniture else {
-                  print("⏳ Already placing furniture, ignoring tap")
-                  return
-              }
+        guard let modelURLString = furnitureData.usdz3DUrl?.absoluteString else {
+            print("   ❌ Invalid model URL for \(furnitureData.itemName)")
+            return
+        }
         
-        let tapLocation = sender.location(in: arView)
-        let entityHits = arView.entities(at: tapLocation)
-        
-        if let tappedEntity = entityHits.first, let draggableEntity = findDraggableParent(from: tappedEntity) {
-                    print("👆 Tap: Selected \(draggableEntity.name) for manipulation")
-            
-            if let modelEntity = draggableEntity as? ModelEntity {
-                arView.installGestures([.translation, .rotation], for: modelEntity)
+        Task {
+            do {
+                // Load the 3D model from URL (Assuming USDZCache exists in your project)
+                let furnitureEntity = try await USDZCache.shared.loadEntity(from: modelURLString)
                 
-                let subscription = modelEntity.scene?.subscribe(to: SceneEvents.Update.self) { [weak self, weak modelEntity] _ in
-                    guard let self = self, let entity = modelEntity else { return }
-                    
-                    let pos2D = SIMD2<Float>(entity.position.x, entity.position.z)
-                    
-                    if let polygon = self.getFloorPolygon() {
-                        if !isPointInPolygonWithMargin(point: pos2D, polygon: polygon, margin: 0.5) {
-                            print("⚠️ Entity moved outside bounds, reverting position")
-                            self.showBoundaryWarning(message: "⚠️ Cannot move outside room boundaries!")
-                            
-                            if let validPos = self.findNearestValidPosition(point: pos2D, polygon: polygon) {
-                                entity.position.x = validPos.x
-                                entity.position.z = validPos.y
-                            }
-                        }
-                        
-                        if isNearDoor(position: pos2D, doors: self.doorLocations, clearanceRadius: 2.0) {
-                            print("⚠️ Entity too close to door")
-                            self.showBoundaryWarning(message: "⚠️ Cannot place near doorway!")
-                            
-                            if let validPos = self.findNearestValidPosition(point: pos2D, polygon: polygon) {
-                                entity.position.x = validPos.x
-                                entity.position.z = validPos.y
-                            }
-                        }
+                // Normalize size
+                let dimensions = furnitureData.dimensionsInMeters
+                let (offset, scale) = normalizeFurniture(furnitureEntity, targetSize: dimensions)
+                
+                // Apply transformations
+                furnitureEntity.scale = scale
+                furnitureEntity.position = item.position + offset
+                furnitureEntity.orientation = simd_quatf(angle: item.rotation * .pi / 180.0, axis: [0, 1, 0])
+                furnitureEntity.name = "FURN_\(index)_\(furnitureData.itemName.replacingOccurrences(of: " ", with: "_"))"
+                
+                // Enable collision for interactions
+                furnitureEntity.generateCollisionShapes(recursive: true)
+                
+                await MainActor.run {
+                    anchor.addChild(furnitureEntity)
+                    self.furnitureLoaded += 1
+                    print("   ✅ Placed \(furnitureData.itemName) (\(self.furnitureLoaded)/\(self.totalFurnitureToLoad))")
+                }
+                
+            } catch {
+                print("   ❌ Failed to load \(furnitureData.itemName): \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func placeSingleFurnitureInAR(
+        item: PlacedFurniture,
+        furnitureData: FurnitureItem,
+        in anchor: Entity
+    ) {
+        guard let modelURLString = furnitureData.usdz3DUrl?.absoluteString else {
+            print("❌ Invalid model URL for \(furnitureData.itemName)")
+            return
+        }
+        
+        Task {
+            do {
+                let furnitureEntity = try await USDZCache.shared.loadEntity(from: modelURLString)
+                
+                let dimensions = furnitureData.dimensionsInMeters
+                let (offset, scale) = normalizeFurniture(furnitureEntity, targetSize: dimensions)
+                
+                furnitureEntity.scale = scale
+                furnitureEntity.position = item.position + offset
+                furnitureEntity.orientation = simd_quatf(angle: item.rotation * .pi / 180.0, axis: [0, 1, 0])
+                
+                let index = anchor.children.filter { $0.name.starts(with: "FURN_") }.count
+                furnitureEntity.name = "FURN_\(index)_\(furnitureData.itemName.replacingOccurrences(of: " ", with: "_"))"
+                
+                furnitureEntity.generateCollisionShapes(recursive: true)
+                
+                await MainActor.run {
+                    anchor.addChild(furnitureEntity)
+                    print("✅ Added \(furnitureData.itemName) to AR scene")
+                }
+                
+            } catch {
+                print("❌ Failed to load \(furnitureData.itemName): \(error)")
+            }
+        }
+    }
+    
+    // ============================================================================
+    // API HELPERS
+    // ============================================================================
+    
+    func getMacIP() -> String {
+        return "172.20.10.11"  // Update this to your Mac's IP
+    }
+    
+    @MainActor
+    func callSearchAPI(macIP: String, prompt: String) async -> Data? {
+        var comps = URLComponents()
+        comps.scheme = "http"
+        comps.host = macIP
+        comps.port = 8000
+        comps.path = "/text/search_combined"
+        
+        guard let url = comps.url else {
+            print("❌ Invalid search API URL")
+            return nil
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let requestBody: [String: Any] = ["prompt": prompt]
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            print("❌ Failed to serialize request body")
+            return nil
+        }
+        
+        request.httpBody = jsonData
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📡 Search API response: \(httpResponse.statusCode)")
+                
+                if httpResponse.statusCode == 200 {
+                    return data
+                } else {
+                    print("❌ Search API error: \(httpResponse.statusCode)")
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        print("Error details: \(responseString)")
                     }
                 }
             }
-            return
-        }
-        
-        guard let result = arView.raycast(from: tapLocation, allowing: .existingPlaneGeometry, alignment: .horizontal).first else {
-                  print("Tap: No horizontal plane found.")
-                  return
-              }
-        
-        guard let selectedName = self.selectedFurniture,
-              let _ = furnitureAssets[selectedName] else {
-            print("Tap: No furniture selected in palette.")
-            return
-        }
-        
-        isPlacingFurniture = true
-
-        
-        let position = SIMD3<Float>(result.worldTransform.columns.3.x,
-                                    result.worldTransform.columns.3.y,
-                                    result.worldTransform.columns.3.z)
-        
-        placeFurniture(name: selectedName, position: position, rotation: 0, in: furnitureAnchor)
-        self.addItemToCart(category: selectedName)
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                  self.isPlacingFurniture = false
-                  print("✅ Ready for next placement")
-              }
-    }
-    
-    private func findNearestValidPosition(point: SIMD2<Float>, polygon: [SIMD2<Float>]) -> SIMD2<Float>? {
-        let center = getPolygonCenter(polygon: polygon)
-        let directionToCenter = normalize(center - point)
-        
-        for i in 1...20 {
-            let distance = Float(i) * 0.1
-            let candidate = point + directionToCenter * distance
-            
-            if isPointInPolygonWithMargin(point: candidate, polygon: polygon, margin: 0.5) &&
-               !isNearDoor(position: candidate, doors: doorLocations, clearanceRadius: 2.0) {
-                return candidate
-            }
+        } catch {
+            print("❌ Search API network error: \(error.localizedDescription)")
         }
         
         return nil
     }
     
-    private func getFloorPolygon() -> [SIMD2<Float>]? {
-        guard let floorElement = structuralElements.first(where: { $0.type == "floor" }),
-              let polygonData = floorElement.polygon else { return nil }
-        
-        return polygonData.map { SIMD2<Float>($0[0], $0[1]) }
-    }
-    
-    private func showBoundaryWarning(message: String) {
-        DispatchQueue.main.async {
-            self.boundaryWarningMessageBinding?.wrappedValue = message
-            self.showBoundaryWarningBinding?.wrappedValue = true
-        }
-    }
-    private func getFloorHeight() -> Float {
-         // Try to get floor height from structural elements
-         if let floorElement = structuralElements.first(where: { $0.type == "floor" }) {
-             let floorY = (floorElement.minBounds[1] + floorElement.maxBounds[1]) / 2.0
-             print("📏 Floor height from elements: \(floorY)")
-             return floorY
-         }
-         
-         // Fallback to room bounds
-         if let bounds = roomBounds {
-             let floorY = bounds.minBounds.y
-             print("📏 Floor height from bounds: \(floorY)")
-             return floorY
-         }
-         
-         // Default fallback
-         print("⚠️ Using default floor height: 0.0")
-         return 0.0
-     }
-}
-
-extension BoundingBox {
-    func toMDLAxisAlignedBoundingBox() -> MDLAxisAlignedBoundingBox {
-        return MDLAxisAlignedBoundingBox(maxBounds: self.max, minBounds: self.min)
-    }
-}
-
-// ============================================================================
-// AI GENERATION EXTENSION
-// ============================================================================
-extension ARCoordinator {
-    
-    func generateDesignFromPrompt(_ prompt: String, from scanURL: URL, completion: @escaping ([PlacedFurniture]?) -> Void) {
-        print("\n🎨 GENERATING DESIGN FROM PROMPT\n")
-        
-        guard let roomEntity = try? Entity.load(contentsOf: scanURL) else {
-            print("❌ ERROR: Could not load entity from scanURL: \(scanURL)")
-            completion(nil)
-            return
-        }
-
-        print("📐 Processing room geometry...")
-        let roomResult = processLoadedRoom(entity: roomEntity)
-        let roomBounds = roomResult.overallBounds
-        let elements = roomResult.elements
-        print("✅ Room bounds: min=\(roomBounds.min), max=\(roomBounds.max)")
-        
-        let doors = extractDoorLocations(from: elements)
-        self.doorLocations = doors
-        
-        var doorZonesDescription = ""
-        if !doors.isEmpty {
-            doorZonesDescription = "\n\n**DOOR EXCLUSION ZONES:**\n"
-            for (index, door) in doors.enumerated() {
-                let exclusionRadius: Float = 2.0
-                doorZonesDescription += """
-                Door \(index + 1): Center at (\(String(format: "%.2f", door.position.x)), \(String(format: "%.2f", door.position.y)))
-                - DO NOT place furniture within \(exclusionRadius)m radius of this point
-                - Minimum clearance: \(exclusionRadius)m
-                
-                """
-            }
-        }
-        
-        guard let floorElement = elements.first(where: { $0.type == "floor" }),
-              let floorPolygonData = floorElement.polygon else {
-            print("❌ ERROR: No floor found")
-            completion(nil)
-            return
-        }
-        
-        var floorPolygon = floorPolygonData.map { SIMD2<Float>($0[0], $0[1]) }
-        var polygonArea = getPolygonArea(polygon: floorPolygon)
-        
-        if polygonArea < 1.0 {
-            print("⚠️ WARNING: Floor polygon area is too small")
-            print("🔧 Using rectangular fallback...")
-            
-            let margin: Float = 0.5
-            let minX = roomBounds.min.x + margin
-            let maxX = roomBounds.max.x - margin
-            let minZ = roomBounds.min.z + margin
-            let maxZ = roomBounds.max.z - margin
-            
-            floorPolygon = [
-                SIMD2<Float>(minX, minZ),
-                SIMD2<Float>(maxX, minZ),
-                SIMD2<Float>(maxX, maxZ),
-                SIMD2<Float>(minX, maxZ)
-            ]
-            
-            polygonArea = (maxX - minX) * (maxZ - minZ)
-        }
-        
-        let polygonBounds = getPolygonBounds(polygon: floorPolygon)
-        let polygonCenter = getPolygonCenter(polygon: floorPolygon)
-        let floorHeight = (floorElement.minBounds[1] + floorElement.maxBounds[1]) / 2.0
-        
-        let safeMargin: Float = 0.5
-        let safeMinX = polygonBounds.min.x + safeMargin
-        let safeMaxX = polygonBounds.max.x - safeMargin
-        let safeMinZ = polygonBounds.min.y + safeMargin
-        let safeMaxZ = polygonBounds.max.y - safeMargin
-        
-        let systemPrompt = """
-        You are an expert interior designer AI with advanced spatial awareness and aesthetic sense.
-
-        **CRITICAL RULES:**
-        1. ALL furniture MUST be INSIDE the floor polygon
-        2. ALL furniture MUST be at least 0.5 meters from walls
-        3. NEVER place furniture within 2.0 meters of any door entrance
-        4. DO NOT include Painting or Wall_Clock in your response - these will be added separately
-
-        **FURNITURE RELATIONSHIPS:**
-        - Study Desk → MUST have Office Chair in front (0.6-0.8m distance)
-        - Sofa → Often has Table nearby (1.0-1.5m distance)
-        - Bed → May have Table as nightstand (0.5-0.8m)
-
-        **SPACING REQUIREMENTS:**
-        - Large furniture: 1.5-2.0m (Sofa, Bed, Wardrobe)
-        - Medium furniture: 1.2-1.5m (Bookshelf, Desk)
-        - Wall clearance: 0.5m minimum
-
-        **WALL ALIGNMENT:**
-        - Sofa, Bed, Bookshelf, Wardrobe: MUST be against walls
-        - Use rotation: 0, 90, 180, or 270 degrees ONLY
-
-        **OUTPUT FORMAT:**
-        Return ONLY valid JSON array. Each item: category, position_x, position_z, rotation_y
-        """
-        
-        let userQuery = """
-        **USER REQUEST:** '\(prompt)'
-
-        **ROOM CONSTRAINTS:**
-        - X-axis range: \(String(format: "%.2f", safeMinX)) to \(String(format: "%.2f", safeMaxX)) meters
-        - Z-axis range: \(String(format: "%.2f", safeMinZ)) to \(String(format: "%.2f", safeMaxZ)) meters
-        - Room center: (\(String(format: "%.2f", polygonCenter.x)), \(String(format: "%.2f", polygonCenter.y)))
-        - Floor area: \(String(format: "%.2f", polygonArea)) m²
-        \(doorZonesDescription)
-
-        Generate furniture layout respecting ALL constraints above.
-        DO NOT include Painting or Wall_Clock.
-        """
-        
+    @MainActor
+    func callGeminiAPI(prompt: String) async -> Data? {
         let apiKey = "AIzaSyClvAPSXDweflBx4HyHCD7StHop6i3xojY"
-        let apiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=\(apiKey)"
         
-        let schema = """
-        {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "category": { "type": "string" },
-              "position_x": { "type": "number" },
-              "position_z": { "type": "number" },
-              "rotation_y": { "type": "number" }
-            },
-            "required": ["category", "position_x", "position_z", "rotation_y"]
-          }
-        }
-        """
+        let modelName = "gemini-2.5-flash"
+            guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent?key=\(apiKey)") else {
+                print("❌ Invalid Gemini API URL")
+                return nil
+            }
         
-        let payload: [String: Any] = [
-            "contents": [["parts": [["text": userQuery]]]],
-            "systemInstruction": ["parts": [["text": systemPrompt]]],
-            "generationConfig": [
-                "responseMimeType": "application/json",
-                "responseSchema": try! JSONSerialization.jsonObject(with: schema.data(using: .utf8)!, options: [])
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let requestBody: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": prompt]
+                    ]
+                ]
             ]
         ]
         
-        var request = URLRequest(url: URL(string: apiUrl)!)
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-        
-        Task {
-            do {
-                print("🌐 Calling Gemini AI...")
-                let (data, _) = try await URLSession.shared.data(for: request)
-                
-                print("--- RAW GEMINI RESPONSE --- \n\(String(data: data, encoding: .utf8) ?? "No data")\n---------------------------")
-                
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let candidates = json["candidates"] as? [[String: Any]],
-                      let firstCandidate = candidates.first,
-                      let content = firstCandidate["content"] as? [String:Any],
-                      let parts = content["parts"] as? [[String: Any]],
-                      let firstPart = parts.first,
-                      let text = firstPart["text"] as? String else {
-                    print("❌ ERROR: Could not parse Gemini response")
-                    throw URLError(.cannotParseResponse)
-                }
-                
-                let responseJsonData = text.data(using: .utf8)!
-                let llmResponse = try JSONDecoder().decode([LLMPlacementResponse].self, from: responseJsonData)
-                
-                print("\n🤖 AI GENERATED \(llmResponse.count) ITEMS")
-                
-                // Convert to PlacedFurniture
-                var layout = llmResponse.map { item in
-                    PlacedFurniture(
-                        position: SIMD3<Float>(item.position_x, 0.0, item.position_z),
-                        rotation: item.rotation_y,
-                        category: item.category
-                    )
-                }
-                
-                // Filter out wall items
-                let wallDecorations = ["Painting", "Wall_Clock", "Wall Clock"]
-                let originalCount = layout.count
-                layout = layout.filter { !wallDecorations.contains($0.category) }
-                let filteredCount = originalCount - layout.count
-
-                if filteredCount > 0 {
-                    print("🚫 Filtered out \(filteredCount) wall decorations")
-                }
-
-                print("\n🔍 VALIDATING FURNITURE POSITIONS...")
-                
-                // Validate and fix layout
-                layout = validateAndFixLayoutWithDoors(
-                    layout: layout,
-                    polygon: floorPolygon,
-                    doors: doors,
-                    margin: 0.5,
-                    doorClearance: 2.5
-                )
-                
-                layout = normalizeRotations(layout: layout)
-                layout = ensureProperSpacing(layout: layout, polygon: floorPolygon)
-                layout = alignFurnitureToWalls(layout: layout, polygon: floorPolygon)
-                layout = ensureTablesHaveChairs(layout: layout, polygon: floorPolygon)
-                layout = placePotsOnTables(layout: layout)
-                
-                // Process with metadata
-                layout = processLayoutWithMetadata(
-                    layout: layout,
-                    polygon: floorPolygon,
-                    floorHeight: floorHeight,
-                    rotationStrategy: "smart"
-                )
-                
-                // Apply collision avoidance
-                layout = placeWithCollisionAvoidance(
-                    layout: layout,
-                    polygon: floorPolygon
-                )
-                
-                // Add wall decorations manually
-                layout = addWallDecorationsManually(
-                    to: layout,
-                    polygon: floorPolygon,
-                    floorHeight: floorHeight
-                )
-
-                print("\n✅ Final layout: \(layout.count) items")
-                
-                // Update cart
-                let newCart = layout.reduce(into: [String: Int]()) { counts, item in
-                    counts[item.category, default: 0] += 1
-                }
-                
-                DispatchQueue.main.async {
-                    self.furnitureCart = newCart
-                    self.updateTotalPrice()
-                    completion(layout)
-                }
-                
-            } catch {
-                print("❌ ERROR calling Gemini: \(error)")
-                DispatchQueue.main.async {
-                    self.furnitureCart = [:]
-                    self.updateTotalPrice()
-                    completion(nil)
-                }
-            }
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            print("❌ Failed to serialize Gemini request")
+            return nil
         }
-    }
-    
-    
-    struct LLMPlacementResponse: Codable {
-        let category: String
-        let position_x: Float
-        let position_z: Float
-        let rotation_y: Float
-    }
-}
-
-// ============================================================================
-// VALIDATION WITH DOOR CHECKING
-// ============================================================================
-func validateAndFixLayoutWithDoors(
-    layout: [PlacedFurniture],
-    polygon: [SIMD2<Float>],
-    doors: [DoorInfo],
-    margin: Float = 0.5,
-    doorClearance: Float = 2.0
-) -> [PlacedFurniture] {
-    
-    var validatedLayout: [PlacedFurniture] = []
-    var invalidCount = 0
-    
-    for item in layout {
-        let pos2D = SIMD2<Float>(item.position.x, item.position.z)
         
-        guard isPointInPolygonWithMargin(point: pos2D, polygon: polygon, margin: margin) else {
-            print("❌ \(item.category) OUTSIDE safe zone")
+        request.httpBody = jsonData
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
             
-            if let validPos = findNearestValidPositionAvoidingDoors(
-                point: pos2D,
-                polygon: polygon,
-                doors: doors,
-                margin: margin,
-                doorClearance: doorClearance
-            ) {
-                print("✅ CORRECTED position")
-                validatedLayout.append(PlacedFurniture(
-                    position: SIMD3<Float>(validPos.x, item.position.y, validPos.y),
-                    rotation: item.rotation,
-                    category: item.category
-                ))
-            } else {
-                print("🚫 REMOVED - no valid position")
-                invalidCount += 1
-            }
-            continue
-        }
-        
-        if isNearDoor(position: pos2D, doors: doors, clearanceRadius: doorClearance) {
-            print("🚪 \(item.category) TOO CLOSE to door")
-            
-            if let validPos = findNearestValidPositionAvoidingDoors(
-                point: pos2D,
-                polygon: polygon,
-                doors: doors,
-                margin: margin,
-                doorClearance: doorClearance
-            ) {
-                print("✅ MOVED away from door")
-                validatedLayout.append(PlacedFurniture(
-                    position: SIMD3<Float>(validPos.x, item.position.y, validPos.y),
-                    rotation: item.rotation,
-                    category: item.category
-                ))
-            } else {
-                print("🚫 REMOVED - too close to door")
-                invalidCount += 1
-            }
-            continue
-        }
-        
-        print("✅ \(item.category) VALID")
-        validatedLayout.append(item)
-    }
-    
-    if invalidCount > 0 {
-        print("\n⚠️ Removed \(invalidCount) invalid items")
-    }
-    
-    return validatedLayout
-}
-
-func findNearestValidPositionAvoidingDoors(
-    point: SIMD2<Float>,
-    polygon: [SIMD2<Float>],
-    doors: [DoorInfo],
-    margin: Float = 0.5,
-    doorClearance: Float = 2.0
-) -> SIMD2<Float>? {
-    
-    let center = getPolygonCenter(polygon: polygon)
-    let directionToCenter = normalize(center - point)
-    
-    for i in 1...50 {
-        let distance = Float(i) * 0.2
-        let candidate = point + directionToCenter * distance
-        
-        if isPointInPolygonWithMargin(point: candidate, polygon: polygon, margin: margin) &&
-           !isNearDoor(position: candidate, doors: doors, clearanceRadius: doorClearance) {
-            return candidate
-        }
-    }
-    
-    let angleStep: Float = 30 * .pi / 180
-    let radiusStep: Float = 0.3
-    
-    for radius in stride(from: radiusStep, through: 3.0, by: radiusStep) {
-        for angle in stride(from: Float(0), to: 2 * .pi, by: angleStep) {
-            let offset = SIMD2<Float>(cos(angle), sin(angle)) * radius
-            let candidate = point + offset
-            
-            if isPointInPolygonWithMargin(point: candidate, polygon: polygon, margin: margin) &&
-               !isNearDoor(position: candidate, doors: doors, clearanceRadius: doorClearance) {
-                return candidate
-            }
-        }
-    }
-    
-    return nil
-}
-
-// ============================================================================
-// ROTATION NORMALIZATION
-// ============================================================================
-func normalizeRotations(layout: [PlacedFurniture]) -> [PlacedFurniture] {
-    let largeFurniture = ["Sofa", "Bed", "Bookshelf", "Wardrobe", "Dressing_Table", "Study Desk"]
-    
-    return layout.map { item in
-        if largeFurniture.contains(item.category) {
-            let normalizedRotation = round(item.rotation / 90.0) * 90.0
-            print("🔄 Normalized \(item.category) rotation: \(normalizedRotation)°")
-            
-            return PlacedFurniture(
-                position: item.position,
-                rotation: normalizedRotation,
-                category: item.category
-            )
-        }
-        return item
-    }
-}
-
-// ============================================================================
-// SPACING ENFORCEMENT
-// ============================================================================
-func ensureProperSpacing(layout: [PlacedFurniture], polygon: [SIMD2<Float>]) -> [PlacedFurniture] {
-    var adjustedLayout: [PlacedFurniture] = []
-    
-    func getMinSpacing(category: String) -> Float {
-        switch category {
-        case "Sofa", "Bed", "Wardrobe":
-            return 2.0  // Increased from 1.5
-        case "Table", "Study Desk", "Bookshelf", "Dressing_Table":
-            return 1.5  // Increased from 1.2
-        default:
-            return 1.0  // Increased from 0.8
-        }
-    }
-    
-    for item in layout {
-        var position2D = SIMD2<Float>(item.position.x, item.position.z)
-        var needsAdjustment = false
-        
-        for placedItem in adjustedLayout {
-            let placedPos2D = SIMD2<Float>(placedItem.position.x, placedItem.position.z)
-            let distance = length(position2D - placedPos2D)
-            let requiredSpacing = max(getMinSpacing(category: item.category), getMinSpacing(category: placedItem.category))
-            
-            if distance < requiredSpacing {
-                needsAdjustment = true
-                print("⚠️ \(item.category) too close to \(placedItem.category)")
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📡 Gemini API response: \(httpResponse.statusCode)")
                 
-                let direction = normalize(position2D - placedPos2D)
-                position2D = placedPos2D + direction * (requiredSpacing + 0.3)
-                
-                if !isPointInPolygonWithMargin(point: position2D, polygon: polygon, margin: 0.5) {
-                    position2D = placedPos2D - direction * (requiredSpacing + 0.3)
-                    
-                    if !isPointInPolygonWithMargin(point: position2D, polygon: polygon, margin: 0.5) {
-                        print("🚫 Cannot find valid spacing for \(item.category)")
-                        continue
+                if httpResponse.statusCode == 200 {
+                    // Parse Gemini response to extract text
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let candidates = json["candidates"] as? [[String: Any]],
+                       let firstCandidate = candidates.first,
+                       let content = firstCandidate["content"] as? [String: Any],
+                       let parts = content["parts"] as? [[String: Any]],
+                       let firstPart = parts.first,
+                       let text = firstPart["text"] as? String {
+                        return text.data(using: .utf8)
+                    }
+                } else {
+                    print("❌ Gemini API error: \(httpResponse.statusCode)")
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        print("Error details: \(responseString.prefix(500))")
                     }
                 }
             }
+        } catch {
+            print("❌ Gemini API network error: \(error.localizedDescription)")
         }
         
-        if needsAdjustment {
-            print("✅ Adjusted \(item.category) position")
-        }
-        
-        adjustedLayout.append(PlacedFurniture(
-            position: SIMD3<Float>(position2D.x, item.position.y, position2D.y),
-            rotation: item.rotation,
-            category: item.category
-        ))
-    }
-    
-    print("\n✅ SPACING CHECK: \(adjustedLayout.count) of \(layout.count) items placed")
-    return adjustedLayout
-}
-func ensureTablesHaveChairs(layout: [PlacedFurniture], polygon: [SIMD2<Float>]) -> [PlacedFurniture] {
-    var updatedLayout = layout
-    
-    let tables = layout.filter {
-        $0.category == "Table" || $0.category == "Study Desk"
-    }
-    
-    for table in tables {
-        // Check if chairs exist near this table
-        let tablePos = SIMD2<Float>(table.position.x, table.position.z)
-        
-        let nearbyChairs = layout.filter { item in
-            guard item.category == "Office Chair" else { return false }
-            let chairPos = SIMD2<Float>(item.position.x, item.position.z)
-            let distance = length(tablePos - chairPos)
-            return distance < 1.5
-        }
-        
-        // If no chairs near table, add chairs
-        if nearbyChairs.isEmpty {
-            let chairCount = table.category == "Study Desk" ? 1 : 2
-            let chairDistance: Float = 0.7
-            
-            for i in 0..<chairCount {
-                let angle = Float(i) * (360.0 / Float(chairCount)) * .pi / 180.0
-                let offset = SIMD2<Float>(cos(angle), sin(angle)) * chairDistance
-                let chairPos2D = tablePos + offset
-                
-                // Check if position is valid
-                if isPointInPolygonWithMargin(point: chairPos2D, polygon: polygon, margin: 0.5) {
-                    let chairRotation = atan2(offset.y, offset.x) * 180.0 / .pi + 180.0
-                    
-                    updatedLayout.append(PlacedFurniture(
-                        position: SIMD3<Float>(chairPos2D.x, 0.0, chairPos2D.y),
-                        rotation: chairRotation,
-                        category: "Office Chair"
-                    ))
-                    
-                    print("✅ Added Office Chair near \(table.category)")
-                }
-            }
-        }
-    }
-    
-    return updatedLayout
-}
-
-// ============================================================================
-// FIX 8: PLACE SMALL POTS ON TABLES (Post-processing)
-// ============================================================================
-
-func placePotsOnTables(layout: [PlacedFurniture]) -> [PlacedFurniture] {
-    var updatedLayout = layout
-    
-    let pots = layout.filter { $0.category == "Pot" }
-    let tables = layout.filter { $0.category == "Table" }
-    
-    guard !pots.isEmpty && !tables.isEmpty else { return layout }
-    
-    for pot in pots {
-        if let nearestTable = tables.min(by: { table1, table2 in
-            let dist1 = length(SIMD2<Float>(pot.position.x, pot.position.z) -
-                             SIMD2<Float>(table1.position.x, table1.position.z))
-            let dist2 = length(SIMD2<Float>(pot.position.x, pot.position.z) -
-                             SIMD2<Float>(table2.position.x, table2.position.z))
-            return dist1 < dist2
-        }) {
-            let tablePos = nearestTable.position
-            
-            // Place pot on table (slightly offset)
-            let offsetX = Float.random(in: -0.2...0.2)
-            let offsetZ = Float.random(in: -0.2...0.2)
-            
-            if let index = updatedLayout.firstIndex(where: {
-                $0.category == pot.category &&
-                $0.position == pot.position
-            }) {
-                updatedLayout[index] = PlacedFurniture(
-                    position: SIMD3<Float>(
-                        tablePos.x + offsetX,
-                        tablePos.y + 0.5,  // On table surface
-                        tablePos.z + offsetZ
-                    ),
-                    rotation: Float.random(in: 0...360),
-                    category: "Pot"
-                )
-                
-                print("✅ Placed Pot on Table")
-            }
-        }
-    }
-    
-    return updatedLayout
-}
-
-// ============================================================================
-// FIX 3: ALIGN LARGE FURNITURE TO WALLS
-// ============================================================================
-
-func alignFurnitureToWalls(
-    layout: [PlacedFurniture],
-    polygon: [SIMD2<Float>]
-) -> [PlacedFurniture] {
-    
-    let largeFurniture = ["Sofa", "Bed", "Bookshelf", "Wardrobe", "Dressing_Table", "Study Desk"]
-    
-    return layout.map { item in
-        guard largeFurniture.contains(item.category) else { return item }
-        
-        let pos2D = SIMD2<Float>(item.position.x, item.position.z)
-        
-        // Find nearest wall edge
-        var nearestEdge: (start: SIMD2<Float>, end: SIMD2<Float>)?
-        var minDistance: Float = .infinity
-        
-        for i in 0..<polygon.count {
-            let start = polygon[i]
-            let end = polygon[(i + 1) % polygon.count]
-            
-            let distance = distanceToLineSegment(point: pos2D, lineStart: start, lineEnd: end)
-            
-            if distance < minDistance {
-                minDistance = distance
-                nearestEdge = (start, end)
-            }
-        }
-        
-        guard let edge = nearestEdge else { return item }
-        
-        // Calculate wall direction
-        let wallDirection = edge.end - edge.start
-        let wallAngle = atan2(wallDirection.y, wallDirection.x) * 180.0 / .pi
-        
-        // Snap to nearest 90-degree angle
-        let normalizedAngle = round(wallAngle / 90.0) * 90.0
-        
-        // Position furniture close to wall (0.3m from wall)
-        let wallNormal = SIMD2<Float>(-wallDirection.y, wallDirection.x)
-        let normalizedNormal = normalize(wallNormal)
-        let newPos2D = pos2D + normalizedNormal * 0.3
-        
-        print("🔄 Aligned \(item.category) to wall at \(normalizedAngle)°")
-        
-        return PlacedFurniture(
-            position: SIMD3<Float>(newPos2D.x, item.position.y, newPos2D.y),
-            rotation: normalizedAngle + 90.0,  // Face into room
-            category: item.category
-        )
+        return nil
     }
 }
-
-func distanceToLineSegment(point: SIMD2<Float>, lineStart: SIMD2<Float>, lineEnd: SIMD2<Float>) -> Float {
-    let line = lineEnd - lineStart
-    let lineLength = length(line)
-    
-    guard lineLength > 0.001 else {
-        return length(point - lineStart)
-    }
-    
-    let t = max(0, min(1, dot(point - lineStart, line) / (lineLength * lineLength)))
-    let projection = lineStart + line * t
-    
-    return length(point - projection)
-}
-func addWallDecorationsManually(
-    to layout: [PlacedFurniture],
-    polygon: [SIMD2<Float>],
-    floorHeight: Float
-) -> [PlacedFurniture] {
-    
-    print("\n🖼️ Manually adding wall decorations...")
-    
-    var result = layout
-    
-    // Extract wall segments
-    let walls = extractWallSegments(from: polygon)
-    guard walls.count >= 2 else {
-        print("⚠️ Need at least 2 walls for painting and clock")
-        return result
-    }
-    
-    // Sort walls by length (longest first)
-    let sortedWalls = walls.sorted { $0.length > $1.length }
-    
-    // Select two opposite or different walls
-    let paintingWall = sortedWalls[0]  // Longest wall
-    let clockWall = sortedWalls.count >= 3 ? sortedWalls[2] : sortedWalls[1]  // Different wall
-    
-    // === PLACE PAINTING ===
-    let paintingHeight: Float = 1.5  // Eye level
-    let paintingPosition2D = paintingWall.midpoint + paintingWall.normal * 0.05
-    let paintingPosition = SIMD3<Float>(
-        paintingPosition2D.x,
-        floorHeight + paintingHeight,
-        paintingPosition2D.y
-    )
-    let paintingRotation = paintingWall.angle + 90.0
-    
-    let painting = PlacedFurniture(
-        position: paintingPosition,
-        rotation: paintingRotation,
-        category: "Painting"
-    )
-    result.append(painting)
-    print("  ✅ Added Painting on wall 1 at height \(floorHeight + paintingHeight)")
-    
-    // === PLACE CLOCK ===
-    let clockHeight: Float = 2.0  // Above eye level
-    let clockPosition2D = clockWall.midpoint + clockWall.normal * 0.05
-    let clockPosition = SIMD3<Float>(
-        clockPosition2D.x,
-        floorHeight + clockHeight,
-        clockPosition2D.y
-    )
-    let clockRotation = clockWall.angle + 90.0
-    
-    let clock = PlacedFurniture(
-        position: clockPosition,
-        rotation: clockRotation,
-        category: "Wall_Clock"
-    )
-    result.append(clock)
-    print("  ✅ Added Wall_Clock on wall 2 at height \(floorHeight + clockHeight)")
-    
-    return result
-}
-

@@ -173,7 +173,8 @@ func processLoadedRoom(entity: Entity) -> (overallBounds: BoundingBox, elements:
             // Extract world bounds (in root coordinate space)
             //---------------------------------------------------
             let worldBounds = model.visualBounds(relativeTo: nil)
-            currentBounds = worldBounds
+            currentBounds = BoundingBox(from: worldBounds)
+
             
             let ext = worldBounds.extents
             let ctr = worldBounds.center
@@ -208,7 +209,7 @@ func processLoadedRoom(entity: Entity) -> (overallBounds: BoundingBox, elements:
                 currentElement = StructuralElement(
                     id: child.name,
                     type: "wall",
-                    bounds: worldBounds, // <-- Use the BoundingBox
+                    bounds: BoundingBox(from: worldBounds), // <-- Use the BoundingBox
                     normal: normal,
                     thickness: wallThickness,
                     isOpening: false,
@@ -227,7 +228,7 @@ func processLoadedRoom(entity: Entity) -> (overallBounds: BoundingBox, elements:
                 currentElement = StructuralElement(
                     id: child.name,
                     type: "floor",
-                    bounds: worldBounds, // <-- Use the BoundingBox
+                    bounds: BoundingBox(from: worldBounds), // <-- Use the BoundingBox
                     normal: SIMD3<Float>(0, 1, 0), // floor normal always up
                     thickness: nil,
                     isOpening: false,
@@ -248,7 +249,7 @@ func processLoadedRoom(entity: Entity) -> (overallBounds: BoundingBox, elements:
                 currentElement = StructuralElement(
                     id: child.name,
                     type: "door",
-                    bounds: worldBounds, // <-- Use the BoundingBox
+                    bounds: BoundingBox(from: worldBounds), // <-- Use the BoundingBox
                     normal: nil,
                     thickness: nil,
                     isOpening: true,
@@ -263,7 +264,7 @@ func processLoadedRoom(entity: Entity) -> (overallBounds: BoundingBox, elements:
                 currentElement = StructuralElement(
                     id: child.name,
                     type: "window",
-                    bounds: worldBounds, // <-- Use the BoundingBox
+                    bounds: BoundingBox(from: worldBounds), // <-- Use the BoundingBox
                     normal: nil,
                     thickness: nil,
                     isOpening: true,

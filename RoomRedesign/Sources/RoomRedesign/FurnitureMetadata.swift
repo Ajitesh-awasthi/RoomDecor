@@ -2,137 +2,28 @@ import Foundation
 import simd
 
 // ============================================================================
-// FURNITURE METADATA SYSTEM
+// DYNAMIC FURNITURE METADATA FROM LLM RESPONSE
 // ============================================================================
 
-
-/// Metadata for each furniture type
-public struct FurnitureMetadata {
-    let category: String
-    let heightOffset: Float
-    let shouldFaceAwayFromWall: Bool
-    let canRotate: Bool
-    let price: Float
-    
-    init(
-        category: String,
-        heightOffset: Float = 0.0,
-        shouldFaceAwayFromWall: Bool = false,
-        canRotate: Bool = true,
-        price: Float = 0.0
-    ) {
-        self.category = category
-        self.heightOffset = heightOffset
-        self.shouldFaceAwayFromWall = shouldFaceAwayFromWall
-        self.canRotate = canRotate
-        self.price = price
-    }
-}
-
-/// Global furniture metadata registry
-public let furnitureMetadata: [String: FurnitureMetadata] = [
-    "Sofa": FurnitureMetadata(
-        category: "Sofa",
-        shouldFaceAwayFromWall: true,
-        price: 899.99
-    ),
-    "Table": FurnitureMetadata(
-        category: "Table",
-        price: 149.99
-    ),
-    "Lamp": FurnitureMetadata(
-        category: "Lamp",
-        canRotate: false,
-        price: 79.50
-    ),
-    "Study Desk": FurnitureMetadata(
-        category: "Study Desk",
-        shouldFaceAwayFromWall: true,
-        price: 229.00
-    ),
-    "Office Chair": FurnitureMetadata(
-        category: "Office Chair",
-        shouldFaceAwayFromWall: true,
-        price: 179.99
-    ),
-    "Bookshelf": FurnitureMetadata(
-        category: "Bookshelf",
-        shouldFaceAwayFromWall: true,
-        price: 199.99
-    ),
-    "Bed": FurnitureMetadata(
-        category: "Bed",
-        shouldFaceAwayFromWall: true,
-        price: 799.00
-    ),
-    "Wardrobe": FurnitureMetadata(
-        category: "Wardrobe",
-        heightOffset: 0.0,
-        shouldFaceAwayFromWall: true,
-        price: 549.00
-    ),
-    "Dressing_Table": FurnitureMetadata(
-        category: "Dressing_Table",
-        shouldFaceAwayFromWall: true,
-        price: 249.00
-    ),
-    "Painting": FurnitureMetadata(
-        category: "Painting",
-        heightOffset: 1.5,
-        canRotate: false,
-        price: 89.99
-    ),
-    "Wall_Clock": FurnitureMetadata(
-        category: "Wall_Clock",
-        heightOffset: 2.0,
-        canRotate: false,
-        price: 49.99
-    ),
-    "Pot": FurnitureMetadata(
-        category: "Pot",
-        canRotate: false,
-        price: 35.00
-    )
-]
-
-// ============================================================================
-// APPLY METADATA
-// ============================================================================
-
-public func applyFurnitureMetadata(
+/// Apply dynamic positioning based on furniture item from LLM
+ func applyDynamicFurniturePosition(
     item: PlacedFurniture,
-    floorHeight: Float
+    furnitureData: FurnitureItem,
+    floorHeight: Float,
+    polygon: [SIMD2<Float>]
 ) -> PlacedFurniture {
     
-    guard let metadata = furnitureMetadata[item.category] else {
-           // For items without metadata, place ON floor
-           let adjustedPosition = SIMD3<Float>(
-               item.position.x,
-               floorHeight,
-               item.position.z
-           )
-           return PlacedFurniture(
-               position: adjustedPosition,
-               rotation: item.rotation,
-               category: item.category
-           )
-       }
+    let dimensions = furnitureData.dimensionsInMeters
     
-    // Apply correct height based on metadata
-    let adjustedY: Float
-    
-    if isWallItem(item.category) {
-        // Wall items use their specified height offset
-        adjustedY = floorHeight + metadata.heightOffset
-        print("🖼️ Placing \(item.category) at height \(adjustedY) (floor: \(floorHeight) + offset: \(metadata.heightOffset))")
-    } else {
-        // Floor items should be ON the floor
-        adjustedY = floorHeight + 0.01  // Tiny offset to prevent z-fighting
+    // For beds, align to nearest wall
+    if furnitureData.category.lowercased() == "bed" {
+        return alignBedToWall(item: item, floorHeight: floorHeight, polygon: polygon)
     }
     
+    // Place furniture on floor
     let adjustedPosition = SIMD3<Float>(
         item.position.x,
-        adjustedY,
+        floorHeight + 0.01,  // Tiny offset to prevent z-fighting
         item.position.z
     )
     
@@ -142,40 +33,118 @@ public func applyFurnitureMetadata(
         category: item.category
     )
 }
+
 // ============================================================================
-// SMART ROTATION
+// BED WALL ALIGNMENT
 // ============================================================================
 
-/// Smart rotation that respects AI's decisions
-public func alignLayoutRotationsRespectingAI(
-    layout: [PlacedFurniture],
+/// Align bed to nearest wall instead of placing in middle
+func alignBedToWall(
+    item: PlacedFurniture,
+    floorHeight: Float,
     polygon: [SIMD2<Float>]
-) -> [PlacedFurniture] {
+) -> PlacedFurniture {
+    
+    let pos2D = SIMD2<Float>(item.position.x, item.position.z)
+    
+    // Find nearest wall edge
+    var nearestEdge: (start: SIMD2<Float>, end: SIMD2<Float>)?
+    var minDistance: Float = .infinity
+    
+    for i in 0..<polygon.count {
+        let start = polygon[i]
+        let end = polygon[(i + 1) % polygon.count]
+        
+        let distance = distanceToLineSegment(point: pos2D, lineStart: start, lineEnd: end)
+        
+        if distance < minDistance {
+            minDistance = distance
+            nearestEdge = (start, end)
+        }
+    }
+    
+    guard let edge = nearestEdge else { return item }
+    
+    // Calculate wall direction
+    let wallDirection = edge.end - edge.start
+    let wallAngle = atan2(wallDirection.y, wallDirection.x) * 180.0 / .pi
+    
+    // Get wall normal (perpendicular to wall)
+    let wallNormal = SIMD2<Float>(-wallDirection.y, wallDirection.x)
+    let normalizedNormal = normalize(wallNormal)
+    
+    // Position bed 0.3m from wall (headboard against wall)
+    let wallOffset: Float = 0.3
+    let newPos2D = projectPointToLine(point: pos2D, lineStart: edge.start, lineEnd: edge.end) + normalizedNormal * wallOffset
+    
+    // ✅ FIX: Bed should be PARALLEL to wall (headboard against wall)
+    // The longer side should be parallel to wall
+    let bedRotation = wallAngle+90  // NOT wallAngle + 90
+    
+    print("🛏️ Aligned bed to wall at \(String(format: "%.1f", bedRotation))° (parallel to wall)")
+    
+    return PlacedFurniture(
+        position: SIMD3<Float>(newPos2D.x, floorHeight + 0.01, newPos2D.y),
+        rotation: bedRotation,  // Parallel to wall
+        category: item.category
+    )
+}
+
+// ============================================================================
+// GEOMETRY HELPERS
+// ============================================================================
+
+private func distanceToLineSegment(point: SIMD2<Float>, lineStart: SIMD2<Float>, lineEnd: SIMD2<Float>) -> Float {
+    let line = lineEnd - lineStart
+    let lineLength = length(line)
+    
+    guard lineLength > 0.001 else {
+        return length(point - lineStart)
+    }
+    
+    let t = max(0, min(1, dot(point - lineStart, line) / (lineLength * lineLength)))
+    let projection = lineStart + line * t
+    
+    return length(point - projection)
+}
+
+func projectPointToLine(point: SIMD2<Float>, lineStart: SIMD2<Float>, lineEnd: SIMD2<Float>) -> SIMD2<Float> {
+    let line = lineEnd - lineStart
+    let lineLength = length(line)
+    
+    guard lineLength > 0.001 else {
+        return lineStart
+    }
+    
+    let t = max(0, min(1, dot(point - lineStart, line) / (lineLength * lineLength)))
+    return lineStart + line * t
+}
+
+// ============================================================================
+// SMART ROTATION FOR LARGE FURNITURE
+// ============================================================================
+
+/// Apply smart rotation to furniture based on position and type
+ func applySmartRotation(
+    layout: [PlacedFurnitureWithMetadata],
+    polygon: [SIMD2<Float>]
+) -> [PlacedFurnitureWithMetadata] {
     
     guard !polygon.isEmpty else { return layout }
     
-    print("🎯 Smart rotation (respecting AI's decisions)...")
+    print("🎯 Applying smart rotation...")
     
     return layout.map { item in
-        // Get metadata
-        guard let metadata = furnitureMetadata[item.category] else {
-            print("  ℹ️ \(item.category): No metadata, using AI rotation \(String(format: "%.0f", item.rotation))°")
-            return item
-        }
+        let furniture = item.placement
+        let metadata = item.metadata
         
-        // If furniture can't rotate, force to 0
-        if !metadata.canRotate {
-            print("  🔒 \(item.category): Fixed at 0° (non-rotatable)")
-            return PlacedFurniture(
-                position: item.position,
-                rotation: 0.0,
-                category: item.category
-            )
-        }
+        // Large furniture should face away from nearest wall
+        let isLargeFurniture = metadata.size.lowercased() == "large" ||
+                              metadata.category.lowercased() == "bed" ||
+                              metadata.category.lowercased() == "sofa"
         
-        // If furniture should face wall
-        if metadata.shouldFaceAwayFromWall {
-            let pos2D = SIMD2<Float>(item.position.x, item.position.z)
+        if isLargeFurniture {
+            let pos2D = SIMD2<Float>(furniture.position.x, furniture.position.z)
             
             // Find nearest wall
             var nearestWallAngle: Float = 0
@@ -203,76 +172,27 @@ public func alignLayoutRotationsRespectingAI(
                 }
             }
             
-            // Use wall-based rotation
+            // Use wall-based rotation (face away from wall)
             var rotation = nearestWallAngle + 90
             while rotation < 0 { rotation += 360 }
             while rotation >= 360 { rotation -= 360 }
             
-            print("  🧭 \(item.category): \(String(format: "%.0f", rotation))° (wall-aligned)")
+            print("  🧭 \(metadata.itemName): \(String(format: "%.0f", rotation))° (wall-aligned)")
             
-            return PlacedFurniture(
-                position: item.position,
+            let newPlacement = PlacedFurniture(
+                position: furniture.position,
                 rotation: rotation,
-                category: item.category
+                category: furniture.category
+            )
+            
+            return PlacedFurnitureWithMetadata(
+                placement: newPlacement,
+                metadata: metadata
             )
         }
         
-        // Otherwise, use AI's rotation
-        print("  ✅ \(item.category): \(String(format: "%.0f", item.rotation))° (from AI)")
+        // Small furniture keeps AI's rotation
+        print("  ✅ \(metadata.itemName): \(String(format: "%.0f", furniture.rotation))° (from AI)")
         return item
     }
-}
-
-// ============================================================================
-// MAIN PROCESSING FUNCTION
-// ============================================================================
-
-/// Process complete layout with metadata
-public func processLayoutWithMetadata(
-    layout: [PlacedFurniture],
-    polygon: [SIMD2<Float>],
-    floorHeight: Float,
-    rotationStrategy: String = "smart"
-) -> [PlacedFurniture] {
-    
-    print("\n🔧 Processing layout with metadata system...")
-    
-    // Step 1: Apply height offsets
-    print("\n📏 Applying height offsets...")
-    var processedLayout = layout.map { item in
-        applyFurnitureMetadata(item: item, floorHeight: floorHeight)
-    }
-    
-    // Step 2: Apply rotation strategy
-    print("\n🔄 Applying rotation strategy: \(rotationStrategy)")
-    switch rotationStrategy {
-    case "smart":
-        processedLayout = alignLayoutRotationsRespectingAI(
-            layout: processedLayout,
-            polygon: polygon
-        )
-    case "trust_ai":
-        print("  ✅ Using AI's rotations as-is")
-    case "simple":
-        processedLayout = processedLayout.map { item in
-            PlacedFurniture(
-                position: item.position,
-                rotation: 0.0,
-                category: item.category
-            )
-        }
-        print("  🔒 All furniture set to 0°")
-    default:
-        print("  ⚠️ Unknown rotation strategy '\(rotationStrategy)', using AI's rotations")
-    }
-    
-    print("\n✅ Layout processing complete")
-    return processedLayout
-}
-
-// Helper to check if item is a wall decoration
-private func isWallItem(_ category: String) -> Bool {
-    return category == "Painting" ||
-           category == "Wall_Clock" ||
-           category == "Wall Clock"
 }

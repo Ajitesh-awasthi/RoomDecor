@@ -5,14 +5,16 @@ import RealityKit
 // ============================================================================
 // WALL ITEM PLACEMENT SYSTEM
 // ============================================================================
+
 // Helper to check if item is a wall decoration
-private func isWallItem(_ category: String) -> Bool {
+func isWallItem(_ category: String) -> Bool {
     return category == "Painting" ||
            category == "Wall_Clock" ||
            category == "Wall Clock"
 }
+
 /// Find walls in the room and place wall items (paintings, clocks) on them
-public func placeWallItems(
+func placeWallItems(
     layout: [PlacedFurniture],
     polygon: [SIMD2<Float>],
     floorHeight: Float
@@ -64,11 +66,10 @@ struct WallSegment {
     let end: SIMD2<Float>
     let midpoint: SIMD2<Float>
     let length: Float
-    let normal: SIMD2<Float>  // Points inward to room
-    let angle: Float  // Rotation angle for items on this wall
+    let normal: SIMD2<Float>
+    let angle: Float
 }
 
-/// Extract wall segments from floor polygon
 func extractWallSegments(from polygon: [SIMD2<Float>]) -> [WallSegment] {
     
     guard polygon.count >= 3 else { return [] }
@@ -114,6 +115,18 @@ func extractWallSegments(from polygon: [SIMD2<Float>]) -> [WallSegment] {
     return walls
 }
 
+/// Get default height offset for wall items
+func getWallItemHeight(category: String) -> Float {
+    switch category {
+    case "Painting":
+        return 1.5  // Eye level
+    case "Wall_Clock", "Wall Clock":
+        return 2.0  // Above eye level
+    default:
+        return 1.5
+    }
+}
+
 /// Place a wall item on the best available wall
 func placeItemOnWall(
     item: PlacedFurniture,
@@ -122,13 +135,8 @@ func placeItemOnWall(
     existingItems: [PlacedFurniture]
 ) -> PlacedFurniture? {
     
-    // Get metadata for height placement
-    guard let metadata = furnitureMetadata[item.category] else {
-        print("    ⚠️ No metadata for \(item.category)")
-        return nil
-    }
-    
-    let targetHeight = floorHeight + metadata.heightOffset
+    let heightOffset = getWallItemHeight(category: item.category)
+    let targetHeight = floorHeight + heightOffset
     let minWallSpacing: Float = 1.0  // Minimum distance between wall items
     
     // Try each wall
@@ -208,12 +216,8 @@ public func distributeWallItemsEvenly(
         }
         
         let wall = sortedWalls[wallIndex]
-        
-        guard let metadata = furnitureMetadata[item.category] else {
-            continue
-        }
-        
-        let targetHeight = floorHeight + metadata.heightOffset
+        let heightOffset = getWallItemHeight(category: item.category)
+        let targetHeight = floorHeight + heightOffset
         let wallOffset: Float = 0.05
         
         // Place at 1/3 or 2/3 along wall for variety
@@ -288,9 +292,8 @@ public func smartPlaceWallItems(
         }
         
         // Place on best wall
-        guard let metadata = furnitureMetadata[wallItem.category] else { continue }
-        
-        let targetHeight = floorHeight + metadata.heightOffset
+        let heightOffset = getWallItemHeight(category: wallItem.category)
+        let targetHeight = floorHeight + heightOffset
         let wallOffset: Float = 0.05
         let position2D = wall.midpoint + wall.normal * wallOffset
         
